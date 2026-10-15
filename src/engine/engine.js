@@ -200,7 +200,7 @@ export class Engine {
         const p = d.ports[me.port];
         if (d.kind !== 'switch' || !p.bpduguard || p.errDisabled || !p.adminUp) continue;
         const od = s.devices[other.dev];
-        if (od.kind !== 'switch' || !od.ports[other.port].adminUp) continue;
+        if (od.kind !== 'switch' || !this.linkStatus(l.id).up) continue; // no link, no BPDUs
         const speaks = Object.keys(od.vlans).some(v => carries(od, od.ports[other.port], Number(v)) && !(od.stp.disabled || []).some(([a, b]) => v >= a && v <= b));
         if (!speaks) continue;
         p.errDisabled = 'bpduguard';

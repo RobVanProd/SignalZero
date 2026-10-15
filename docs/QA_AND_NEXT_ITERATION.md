@@ -17,13 +17,14 @@ Date: 15 October 2026. The v0.2 QA document is preserved in [`prototype/v0.2/QA_
 
 ## Verified (automated, reproducible)
 
-`npm test` — node:test, 34 tests, all passing at the time of writing:
+`npm test` — node:test, 48 tests, all passing at the time of writing:
 
 - IPv4 math (masks, ranges, overlap, wildcards).
 - Engine: speed/duplex negotiation incl. parallel detection, ACL first-match/implicit-deny/undefined-ACL, ACE parsing, IOS grammar (abbreviation, ambiguity, incomplete, caret position), dhcpd.conf / zone / netplan parsers with real-style errors, STP roles and 802.1D timers and priority changes, TTL through PAT, asymmetric failure when NAT is removed, DHCP INIT-REBOOT NAK after a VLAN move, BPDU guard err-disable.
 - Campaign: all 10 incidents start broken; each refuses to complete before verification; each completes with its reference fix plus a verification; aftershocks resolve. Canonical replay starts are unsolved.
 - Negative paths: ping is not proof (M03); zone edit without reload changes nothing; stale client cache defeats the fix until flushed; VLAN-only, ACL-only, ACL-without-DNS and ACL-without-permit-any all fail (M05); relay on the wrong subinterface fails (M07); IOS rejects an overlapping /25 and a scope change without a gateway change fails (M08); snooping without a trusted uplink starves legitimate DHCP (M10).
 - M06 trade-off is measured, not asserted: Rapid PVST+ outage ≤ 3 s, PVST+ 28–40 s, shut-a-riser ≥ 90 s until the player re-enables the port.
+- Accuracy regressions (`tests/unit/accuracy.test.js`, 14 tests, each shown to fail on the pre-fix engine): ACL `established`; IOS NAT/ACL order of operations; PAT un-translating ICMP errors (traceroute through NAT); Rapid PVST+ fast only via edge ports or proposal/agreement with an RSTP neighbour, and M06's mixed-mode outcome; BIND keeping the last good zone after a failed reload and SERVFAIL for a never-loaded primary zone; err-disable recovery needs shut/no shut; interface-only static routes; DNS refused vs timed out; `root primary`/`secondary` macro; valid IOS show/ping commands no longer answered with a fake syntax error; DHCP snooping option 82 vs the IOS relay; IOS defaults (UDP port unreachable, proxy ARP on new subinterfaces); teaching text in M02/M04/M08 matching the simulator.
 - Generator: healthy builds across 12 random addressing plans; every fault class breaks a user-facing flow and its reference repair restores all flows; 40 generated challenges (single and double faults) verified solvable; challenge completion requires a post-fix verification.
 
 `npm run test:browser` — Chromium with SwiftShader WebGL 2 (software rendering, not a GPU):
@@ -35,7 +36,7 @@ Date: 15 October 2026. The v0.2 QA document is preserved in [`prototype/v0.2/QA_
 - **Real GPUs and phones.** Frame rate, thermal behaviour, Safari/iOS WebGL quirks and Android GPU paths are unmeasured. SwiftShader proves the shaders compile and the scene renders, not that it is fast. The Night Ink ink pass runs on every tier (9 depth taps + 1 colour tap per pixel).
 - **The art style's effect on play.** Whether "only signal glows" helps players read faults, and whether the halftone screen causes fatigue over 45 minutes, is untested. Add to the playtest: ask each player what the glowing things meant, and log any complaint about the dots.
 - **Learning.** No learner has played v0.3. There is no evidence yet of enjoyment, retention or transfer.
-- **Output fidelity.** Device outputs imitate real formats from documentation and experience, not from captured traffic or recorded sessions. An independent review pass was run (findings and fixes are listed in the PR description); a recorded comparison against real IOS/Windows/Ubuntu sessions has not been done.
+- **Output fidelity.** Device outputs imitate real formats from documentation and experience, not from captured traffic or recorded sessions. An independent review found 7 high and 11 medium accuracy defects; 16 of them (all 7 high) plus 3 low ones are fixed with regression tests, and findings 10, 15, 17, 18 remain (listed in `docs/SIMULATION_MODEL.md`). Wording added by those fixes that is unconfirmed against real devices: BIND's "loading from master file" (9.18 may say "primary file") and rndc's unknown-zone error; dig's three "connection refused" lines and Linux nslookup's refused output; Windows nslookup "No response from server" for a refused query (low confidence); IOS "Routing entry for 0.0.0.0/0, supernet", the `show ip interface` NAT line, "% Invalid source interface", and the trimmed `show interfaces … switchport` / err-disabled layouts. A recorded comparison against real IOS/Windows/Ubuntu sessions has not been done.
 - **Network model vs a reference implementation.** The v0.2 plan's differential test against Linux namespaces or an emulator is still open.
 
 ## Pre-registered playtest (proposal — agree the thresholds before running it)

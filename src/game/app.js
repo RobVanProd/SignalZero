@@ -216,6 +216,9 @@ export class App {
 
   // ---------------------------------------------------------------- evaluation
   evaluate(source = 'action') {
+    // Player actions refresh the monitored flows at once, so the services panel agrees with the checklist
+    // instead of lagging up to one 5 s flow tick behind it. (Flow probes are not recorded as player evidence.)
+    if (source !== 'tick' && this.eng && this.mode !== 'title') { this.eng.evaluateFlows(); this.hud.setServices(this.eng); }
     if (this.campaign) return this.evalCampaign(source);
     if (this.challenge) return this.evalChallenge(source);
     return null;

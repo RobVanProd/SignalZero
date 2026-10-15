@@ -7,8 +7,12 @@
 //  - Everything else is alternate/backup and discards.
 //  - A switch with STP disabled for a VLAN, and any unmanaged bridge, is transparent: it forwards on every
 //    port and floods BPDUs, so it behaves like a shared segment between STP speakers.
-//  - 802.1D timers: blocking -> listening (15 s) -> learning (15 s) -> forwarding. Rapid PVST+: ~1 s.
-//    PortFast edge ports forward immediately.
+//  - 802.1D timers: blocking -> listening (15 s) -> learning (15 s) -> forwarding.
+//  - Rapid PVST+ (802.1w per VLAN): edge (PortFast) ports forward immediately; a new root port forwards in ~1 s
+//    (a local decision); a designated port forwards in ~1 s only through proposal/agreement, i.e. on a
+//    point-to-point (full-duplex) link to another Rapid PVST+ switch. Toward a router, a host without PortFast,
+//    a legacy PVST+ switch or a shared (half-duplex) link it falls back to discarding (15 s) -> learning (15 s).
+//    The timed discarding phase reuses the 'listening' state record; show spanning-tree prints it as BLK.
 
 export const FORWARD_DELAY = 15;
 export const RAPID_DELAY = 1;
@@ -127,8 +131,9 @@ export function computeStpRoles(eng, v) {
       if (!carries(d, p, v)) continue;
       const od = st.devices[other.dev];
       const op = od.ports[other.port];
-      const cost = portCost(eng.linkStatus(l.id).speed);
-      const att = { dev: d.id, port: me.port, cost, edgeCfg: p.portfast };
+      const ls = eng.linkStatus(l.id);
+      const cost = portCost(ls.speed);
+      const att = { dev: d.id, port: me.port, cost, edgeCfg: p.portfast, p2p: ls.duplexA === 'full' && ls.duplexB === 'full' };
       if (isSpeaker(od)) {
         if (!consistentCarriage(d, p, od, op, v)) { segments.push({ atts: [att], edge: true }); continue; }
         // two-speaker segment keyed by link id; add once per side
@@ -213,7 +218,9 @@ export function computeStpRoles(eng, v) {
       if (rootPort[a.dev] === a.port) role = 'root';
       else if (des.att === a) role = 'designated';
       else role = des.att.dev === a.dev ? 'backup' : 'alternate';
-      roles.set(key, { role, edge: !!(seg.edge || seg.atts.length === 1) && a.edgeCfg, rootId: rootOf[a.dev], cost: dist[a.dev] ?? 0 });
+      // STP mode of the neighbour on a two-switch link ('rapid-pvst' | 'pvst'); null for shared/edge segments.
+      const peer = seg.link && seg.atts.length === 2 ? st.devices[seg.atts.find(x => x !== a).dev].stp.mode : null;
+      roles.set(key, { role, edge: !!(seg.edge || seg.atts.length === 1) && a.edgeCfg, rootId: rootOf[a.dev], cost: dist[a.dev] ?? 0, p2p: a.p2p && !seg.comp, peer });
     }
   }
   // Transparent switches forward on every carrying port.
@@ -260,13 +267,21 @@ export function applyStp(eng, converge = false) {
         next = { st: wantFwd ? 'forwarding' : 'blocking', since: now };
       } else if (!wantFwd) {
         if (!cur || cur.st !== 'blocking') next = { st: 'blocking', since: now };
-      } else if (!cur || cur.st === 'blocking') {
-        if (r.edge) next = { st: 'forwarding', since: now };
-        else if (rapid) next = { st: 'learning', since: now, rapid: true };
-        else next = { st: 'listening', since: now };
+      } else {
+        const fast = rapid && (r.role === 'root' || (r.p2p && r.peer === 'rapid-pvst'));
+        if (!cur || cur.st === 'blocking') {
+          if (r.edge) next = { st: 'forwarding', since: now };
+          else if (fast) next = { st: 'learning', since: now, rapid: true };
+          else next = { st: 'listening', since: now }; // on a Rapid PVST+ switch this is RSTP "discarding" (shown BLK)
+        } else if (fast && (cur.st === 'listening' || (cur.st === 'learning' && !cur.rapid))) {
+          // An RSTP neighbour appeared (or the port became root): the handshake cuts the timer short.
+          next = { st: 'learning', since: now, rapid: true };
+        }
       }
       next.role = r.role;
       next.edge = r.edge;
+      next.p2p = r.p2p ?? true;
+      next.peer = r.peer ?? null;
       if (!cur || cur.st !== next.st || cur.role !== next.role) changed = true;
       byV[port] = next;
     }

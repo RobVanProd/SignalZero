@@ -1,15 +1,19 @@
 // Packet path engine. Walks one IPv4 packet hop by hop through the topology:
-// host routing decision -> ARP in the L2 domain -> switch forwarding -> router ingress ACL -> TTL ->
-// longest-prefix match -> egress ACL -> PAT -> next hop ... -> destination service.
+// host routing decision -> ARP in the L2 domain -> switch forwarding -> router ingress ACL -> NAT outside->inside
+// -> TTL -> longest-prefix match -> NAT inside->outside (PAT) -> egress ACL -> next hop ... -> destination service.
+// That is the IOS order of operations: an outbound ACL on the NAT outside interface sees the inside-global source.
 // Replies are traced independently, so asymmetric failures (missing return route, NAT) surface naturally.
+// TCP segments carry flags (the probe's SYN, a SYN-ACK or RST reply) so `established` ACEs can match;
+// ICMP errors carry the embedded header of the packet that triggered them, which is what PAT un-translates.
 //
 // Simplifications (documented in docs/SIMULATION_MODEL.md):
 //  - ACL denies are silent drops (as if `no ip unreachables` were set for filtered traffic).
-//  - Routers do send ICMP net-unreachable for missing routes and time-exceeded for TTL expiry.
+//  - Routers do send ICMP net-unreachable for missing routes, time-exceeded for TTL expiry, and port-unreachable
+//    for UDP to one of their own addresses (unless `no ip unreachables`).
 //  - ARP failure at a router is a silent drop.
 import { flood } from './switching.js';
 import { hostAddr, hostNextHop, l3Ifaces, routeTable, lookup, evalAcl, natOutbound } from './routing.js';
-import { fmtIp } from './ipv4.js';
+import { fmtIp, inSubnet } from './ipv4.js';
 
 const MAX_L3_HOPS = 32;
 
@@ -56,6 +60,13 @@ function pathImpairment(eng, path) {
   return { pass, latency, jitter };
 }
 
+/** What a router does with a packet addressed to one of its own interfaces. */
+function routerService(pkt, ingress) {
+  if (pkt.proto === 'icmp') return 'echo';
+  if (pkt.proto === 'tcp') return 'tcp-refused';
+  return ingress?.cfg.unreachables === false ? 'filtered-host' : 'udp-closed';
+}
+
 function hostService(d, pkt) {
   if (pkt.proto === 'icmp') {
     if (!d.firewall.icmp) return 'filtered-host';
@@ -68,7 +79,8 @@ function hostService(d, pkt) {
 }
 
 /**
- * Send one packet. opts: { from, srcIp?, dst, proto, sport?, dport?, ttl?, nat?, record?, icmpType? }
+ * Send one packet. opts: { from, srcIp?, dst, proto, sport?, dport?, ttl?, nat?, record?, icmpType?, flags?, emb? }
+ * flags: TCP flags (default ['syn']); emb: header embedded in an ICMP error { proto, src, dst, sport, dport }.
  * Returns { outcome, at, pkt, hops, notes, pass, latency, jitter, icmpFrom?, service? }
  */
 export function sendPacket(eng, opts) {
@@ -83,6 +95,8 @@ export function sendPacket(eng, opts) {
   const fail = (outcome, at, reason, extra = {}) => ({ outcome, at, reason, pkt, hops, notes, pass, latency, jitter, nat, ...extra });
 
   let pkt = { src: null, dst: opts.dst, proto: opts.proto, sport: opts.sport ?? 49152, dport: opts.dport, ttl: opts.ttl ?? initialTtl(src), icmpType: opts.icmpType ?? 'echo' };
+  if (pkt.proto === 'tcp') pkt.flags = opts.flags ?? ['syn'];
+  if (opts.emb) pkt.emb = opts.emb;
 
   // ---- origin
   let cur = src;
@@ -105,13 +119,13 @@ export function sendPacket(eng, opts) {
     const rt = eng.routes(src.id);
     if (l3Ifaces(eng, src).some(i => i.addr === pkt.dst && i.up)) {
       pkt.src = pkt.dst;
-      return { outcome: 'delivered', at: src.id, service: pkt.proto === 'icmp' ? 'echo' : 'tcp-refused', pkt, hops, notes, pass, latency, jitter, nat };
+      return { outcome: 'delivered', at: src.id, service: routerService(pkt, null), pkt, hops, notes, pass, latency, jitter, nat };
     }
     const r = lookup(rt.table, pkt.dst);
     if (!r) return fail('local-error', src.id, 'no-route');
     egressIf = l3Ifaces(eng, src).find(i => i.name === r.iface);
     pkt.src = opts.srcIp ?? egressIf.addr;
-    nh = r.type === 'C' ? pkt.dst : r.nh;
+    nh = r.nh ?? pkt.dst;
   } else {
     return fail('local-error', src.id, 'not-an-ip-device');
   }
@@ -122,6 +136,7 @@ export function sendPacket(eng, opts) {
     if (!arp.ep) {
       const why = arp.flood.drops.find(x => x.stp || x.snoop) || null;
       notes.push({ dev: cur.id, layer: 2, text: `ARP for ${fmtIp(nh)} unanswered on ${egressIf.name}${why ? ` (${why.reason} at ${st.devices[why.dev].hostname} ${why.port})` : ''}` });
+      if (cur.kind === 'router' && nh === pkt.dst && !inSubnet(nh, egressIf.addr, egressIf.len)) notes.push({ dev: cur.id, layer: 3, text: `static route names only the exit interface: ${cur.hostname} ARPs for every destination and needs proxy ARP from the next router` });
       if (cur.kind === 'host' || cur.kind === 'fleet') return fail('local-error', cur.id, 'arp-fail', { nh });
       return fail('dropped', cur.id, `ARP for next hop ${fmtIp(nh)} failed (encapsulation failed)`, { nh });
     }
@@ -151,16 +166,20 @@ export function sendPacket(eng, opts) {
         return fail('dropped', cur.id, `denied inbound by ACL ${ingress.cfg.aclIn} on ${ingress.name}`, { acl: { name: ingress.cfg.aclIn, implicit: !!r.implicit, seq: r.entry?.seq } });
       }
     }
-    // NAT un-translation on outside interface
+    // NAT outside -> inside (after the input ACL). An ICMP error is matched on the header it embeds.
     if (ingress.cfg.nat === 'outside') {
-      const tr = nat.find(n => n.router === cur.id && n.outside === pkt.dst && n.proto === pkt.proto && n.port === pkt.dport);
-      if (tr) {
+      const e = pkt.emb;
+      const tr = nat.find(n => n.router === cur.id && n.outside === pkt.dst && (e ? n.proto === e.proto && n.port === e.sport : n.proto === pkt.proto && n.port === pkt.dport));
+      if (tr && e) {
+        notes.push({ dev: cur.id, layer: 3, text: `PAT: ICMP ${pkt.icmpType} about ${e.proto} ${fmtIp(e.src)}:${e.sport} -> inside ${fmtIp(tr.inside)}:${tr.insidePort} (embedded header translated too)` });
+        pkt = { ...pkt, dst: tr.inside, emb: { ...e, src: tr.inside, sport: tr.insidePort } };
+      } else if (tr) {
         notes.push({ dev: cur.id, layer: 3, text: `PAT: ${fmtIp(pkt.dst)}:${pkt.dport} -> inside ${fmtIp(tr.inside)}:${tr.insidePort}` });
         pkt = { ...pkt, dst: tr.inside, dport: tr.insidePort };
       }
     }
     if (l3Ifaces(eng, cur).some(i => i.addr === pkt.dst && i.up)) {
-      return { outcome: 'delivered', at: cur.id, service: pkt.proto === 'icmp' ? 'echo' : 'tcp-refused', pkt, hops, notes, pass, latency, jitter, nat, ingress: ingress.name, ttl: pkt.ttl };
+      return { outcome: 'delivered', at: cur.id, service: routerService(pkt, ingress), pkt, hops, notes, pass, latency, jitter, nat, ingress: ingress.name, ttl: pkt.ttl };
     }
     if (pkt.ttl <= 1) {
       return fail('ttl-exceeded', cur.id, 'TTL expired in transit', { icmpFrom: ingress.addr, ingress: ingress.name });
@@ -174,13 +193,7 @@ export function sendPacket(eng, opts) {
       return fail('net-unreachable', cur.id, `no route to ${fmtIp(pkt.dst)}`, { icmpFrom: ingress.addr, ingress: ingress.name });
     }
     const egress = l3Ifaces(eng, cur).find(i => i.name === r.iface);
-    if (egress.cfg.aclOut) {
-      const ar = evalAcl(cur, egress.cfg.aclOut, pkt, opts.record);
-      if (!ar.permit) {
-        notes.push({ dev: cur.id, layer: 3, text: `${egress.name} outbound ACL ${egress.cfg.aclOut} ${ar.implicit ? 'implicit deny' : `denied by line ${ar.entry.seq}`}` });
-        return fail('dropped', cur.id, `denied outbound by ACL ${egress.cfg.aclOut} on ${egress.name}`, { acl: { name: egress.cfg.aclOut, implicit: !!ar.implicit, seq: ar.entry?.seq } });
-      }
-    }
+    // NAT inside -> outside happens after routing and before the output ACL.
     const xl = natOutbound(cur, ingress, egress, pkt);
     if (xl) {
       const port = pkt.sport;
@@ -188,9 +201,16 @@ export function sendPacket(eng, opts) {
       notes.push({ dev: cur.id, layer: 3, text: `PAT: inside ${fmtIp(pkt.src)}:${pkt.sport} -> outside ${fmtIp(xl.outside)}:${port}` });
       pkt = { ...pkt, src: xl.outside, sport: port };
     }
-    notes.push({ dev: cur.id, layer: 3, text: `route ${fmtIp(pkt.dst)} via ${r.type === 'C' ? 'directly connected' : fmtIp(r.nh)} out ${egress.name}` });
+    if (egress.cfg.aclOut) {
+      const ar = evalAcl(cur, egress.cfg.aclOut, pkt, opts.record);
+      if (!ar.permit) {
+        notes.push({ dev: cur.id, layer: 3, text: `${egress.name} outbound ACL ${egress.cfg.aclOut} ${ar.implicit ? 'implicit deny' : `denied by line ${ar.entry.seq}`}${xl ? ` (evaluated after PAT: source is now ${fmtIp(pkt.src)})` : ''}` });
+        return fail('dropped', cur.id, `denied outbound by ACL ${egress.cfg.aclOut} on ${egress.name}`, { acl: { name: egress.cfg.aclOut, implicit: !!ar.implicit, seq: ar.entry?.seq } });
+      }
+    }
+    notes.push({ dev: cur.id, layer: 3, text: `route ${fmtIp(pkt.dst)} via ${r.nh != null ? fmtIp(r.nh) : 'directly connected'} out ${egress.name}` });
     egressIf = egress;
-    nh = r.type === 'C' ? pkt.dst : r.nh;
+    nh = r.nh ?? pkt.dst;
     latency += 0.05;
   }
   return fail('dropped', cur.id, 'routing loop (TTL would expire)');
@@ -202,8 +222,8 @@ function responseFor(fwd, req) {
     case 'delivered':
       switch (fwd.service) {
         case 'echo': return { proto: 'icmp', icmpType: 'echo-reply', kind: 'reply' };
-        case 'tcp-open': return { proto: 'tcp', kind: 'syn-ack' };
-        case 'tcp-refused': return { proto: 'tcp', kind: 'rst' };
+        case 'tcp-open': return { proto: 'tcp', kind: 'syn-ack', flags: ['syn', 'ack'] };
+        case 'tcp-refused': return { proto: 'tcp', kind: 'rst', flags: ['rst', 'ack'] };
         case 'udp-open': return { proto: 'udp', kind: 'udp-reply' };
         case 'udp-closed': return { proto: 'icmp', icmpType: 'port-unreachable', kind: 'port-unreachable' };
         default: return null; // filtered: silence
@@ -231,9 +251,12 @@ export function probe(eng, req) {
   if (fwd.at === req.from) {
     return { status: 'ok', kind: resp.kind, fwd, rep: null, responderIp: fromIp, ttl: initialTtl(src), rttMs: 0.02, pass: 1 };
   }
+  const isErr = resp.proto === 'icmp' && resp.kind !== 'reply';
+  const f = fwd.pkt;
   const rep = sendPacket(eng, {
-    from: responder.id, srcIp: fromIp, dst: fwd.pkt.src, proto: resp.proto, icmpType: resp.icmpType,
-    sport: fwd.pkt.dport, dport: fwd.pkt.sport, nat: fwd.nat, record: req.record,
+    from: responder.id, srcIp: fromIp, dst: f.src, proto: resp.proto, icmpType: resp.icmpType, flags: resp.flags,
+    sport: f.dport, dport: f.sport, nat: fwd.nat, record: req.record,
+    emb: isErr ? { proto: f.proto, src: f.src, dst: f.dst, sport: f.sport, dport: f.dport } : undefined,
   });
   const backHome = rep.outcome === 'delivered' && rep.at === req.from;
   if (!backHome) return { status: 'timeout', fwd, rep, lostAt: rep.at, lostReason: `reply lost: ${rep.reason || rep.outcome}`, replyLost: true };

@@ -1,7 +1,7 @@
 // Application services: DHCP (server, relay, client), DNS (authoritative + forwarding, Windows cache), HTTP(S).
 import { fmtIp, parseIp, inSubnet, isApipa } from './ipv4.js';
 import { parseDhcpd, subnetOptions } from './parsers/dhcpd.js';
-import { parseZone } from './parsers/zone.js';
+import { parseZone, zoneLoadFailure } from './parsers/zone.js';
 import { hostAddr, l3Ifaces, evalAcl } from './routing.js';
 import { sendPacket, probe } from './trace.js';
 import { macLinux } from './model.js';
@@ -127,6 +127,12 @@ function dhcpCandidates(eng, client, port, mac) {
         const r = evalAcl(d, ifc.cfg.aclIn, { src: 0, dst: 0xffffffff, proto: 'udp', sport: 68, dport: 67 }, false);
         if (!r.permit) { drops.push(`${d.hostname} ${ifc.name}: DHCP broadcast denied by ACL ${ifc.cfg.aclIn}`); continue; }
       }
+      // A snooping switch adds option 82 but leaves giaddr 0; an IOS relay drops that on an untrusted interface.
+      const o82 = option82Inserter(eng, ep.path);
+      if (o82 && !d.relayTrustAll && !ifc.cfg.relayTrust) {
+        drops.push(`${d.hostname} ${ifc.name}: relay dropped the request: option 82 (inserted by DHCP snooping on ${o82.hostname}) with giaddr 0.0.0.0 on an interface not trusted for relay information`);
+        continue;
+      }
       for (const helper of ifc.cfg.helpers) {
         // Relay -> server (unicast from giaddr), then server -> relay.
         const there = sendPacket(eng, { from: d.id, srcIp: ifc.addr, dst: helper, proto: 'udp', sport: 67, dport: 67 });
@@ -143,6 +149,16 @@ function dhcpCandidates(eng, client, port, mac) {
   // Ordering: on-segment servers answer before relayed ones; shorter paths first; then by name for determinism.
   out.sort((x, y) => (x.pathLen - y.pathLen) || x.server.id.localeCompare(y.server.id));
   return { candidates: out, drops, flood: fl };
+}
+
+/** The snooping switch (if any) that inserted option 82 into a client broadcast along this path. */
+function option82Inserter(eng, path) {
+  for (const h of path) {
+    const sw = eng.s.devices[h.to.dev];
+    if (sw.kind !== 'switch' || !sw.snoop.enabled || sw.snoop.opt82 === false || !sw.snoop.vlans.includes(h.vlan)) continue;
+    if (!sw.ports[h.to.port].snoopTrust) return sw;
+  }
+  return null;
 }
 
 /** Does a server->client DHCP message reach the client (DHCP snooping, STP)? */
@@ -343,18 +359,24 @@ export function fleetDhcp(eng, fleet, opts = {}) {
 
 // ------------------------------------------------------------------ DNS
 
-export function namedLoad(eng, dev) {
+/**
+ * Load named's primary zones. opts.reload (rndc reload / systemctl reload): a zone that fails to load keeps
+ * serving the last copy that loaded, as BIND does. On start/restart there is no previous copy: the zone is
+ * simply not loaded, and named answers SERVFAIL for names in it (it never forwards them).
+ */
+export function namedLoad(eng, dev, opts = {}) {
   const svc = dev.services.named;
+  const prev = opts.reload ? svc.loaded || {} : {};
   const loaded = {};
   const errors = [];
   for (const z of svc.zones) {
-    const res = parseZone(dev.files[z.file] ?? '', z.zone, z.file.split('/').pop());
+    const res = parseZone(dev.files[z.file] ?? '', z.zone, z.file);
     if (res.ok) {
       loaded[z.zone] = res;
       eng.journal(dev, 'named', `zone ${z.zone}/IN: loaded serial ${res.serial}`);
     } else {
-      for (const e of res.errors) eng.journal(dev, 'named', e);
-      eng.journal(dev, 'named', `zone ${z.zone}/IN: not loaded due to errors.`);
+      for (const e of [...res.errors, ...zoneLoadFailure(res)]) eng.journal(dev, 'named', e);
+      if (prev[z.zone]) loaded[z.zone] = prev[z.zone];
       errors.push(...res.errors);
     }
   }
@@ -362,9 +384,10 @@ export function namedLoad(eng, dev) {
   return { ok: errors.length === 0, errors };
 }
 
+/** Most specific zone this server is configured as primary for (loaded or not). */
 function zoneFor(svc, qname) {
   let best = null;
-  for (const z of Object.keys(svc.loaded || {})) {
+  for (const { zone: z } of svc.zones || []) {
     if ((qname === z || qname.endsWith('.' + z)) && (!best || z.length > best.length)) best = z;
   }
   return best;
@@ -384,6 +407,7 @@ export function serverAnswer(eng, server, qname, qtype = 'A', depth = 0) {
   const svc = server.services.named;
   if (!svc?.active) return { rcode: 'NOSERVICE', answers: [] };
   const z = zoneFor(svc, qname);
+  if (z && !svc.loaded?.[z]) return { rcode: 'SERVFAIL', answers: [], aa: false };
   if (z) {
     const recs = svc.loaded[z].records;
     const answers = [];
@@ -455,7 +479,10 @@ export function resolveName(eng, client, name, opts = {}) {
     }
     return { ok: false, rcode: ans.rcode, error: ans.rcode.toLowerCase(), serverIp: srvIp, server, answers: ans.answers, aa: ans.aa, qname, tried, probe: p };
   }
-  return { ok: false, error: 'timeout', qname, tried, serverIp: servers[0] };
+  // ICMP port unreachable from every server = host up, nothing listening on UDP 53 ("connection refused"),
+  // which clients report at once instead of after a timeout (same idea as a TCP RST for curl).
+  const refused = tried.every(t => t.status === 'ok' && t.kind === 'port-unreachable');
+  return { ok: false, error: refused ? 'refused' : 'timeout', qname, tried, serverIp: servers[0] };
 }
 
 // ------------------------------------------------------------------ HTTP(S)

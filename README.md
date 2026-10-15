@@ -30,7 +30,7 @@ Design rules carried over from the v0.2 plan:
 
 - **No quiz gates.** Win conditions are behavioural checks against the simulator ("does Ward B's HTTPS request to the records app actually succeed?"), never "did you type this exact line". Any correct fix passes; a "fix" that breaks another service fails the constraints.
 - **Fix, then verify.** An incident completes only after the player produces evidence from a user-facing test *after* the fix (e.g. `curl` from the affected PC).
-- **Several valid interventions with measurable trade-offs.** In the broadcast storm, Rapid PVST+, PVST+ and "shut a riser" all stop the storm; a scripted riser cut later measures the outage each choice causes (≈1–2 s, ≈30 s, or until a human reacts). In the rogue DHCP incident, shutting the port contains it; DHCP snooping prevents the repeat.
+- **Several valid interventions with measurable trade-offs.** In the broadcast storm, Rapid PVST+, PVST+ and "shut a riser" all stop the storm; a scripted riser cut later measures the outage each choice causes (≈1–2 s with Rapid PVST+ on both switches, ≈30 s with PVST+ or a mixed pair, or until a human reacts). In the rogue DHCP incident, shutting the port contains it; DHCP snooping prevents the repeat.
 
 ## Look: "Night Ink"
 

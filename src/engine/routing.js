@@ -71,7 +71,7 @@ export function routeTable(eng, d) {
   for (const r of d.routes) {
     if (r.iface) {
       const i = ifs.find(x => x.name === r.iface);
-      if (i) table.push({ type: 'S', net: r.net, len: r.len, iface: r.iface, nh: r.nh ?? null, ad: r.ad ?? 1 });
+      if (i) table.push({ type: 'S', net: r.net, len: r.len, iface: r.iface, nh: r.nh ?? null, ad: r.ad ?? 1, exitIf: true });
       else notInstalled.push({ route: r, why: `exit interface ${r.iface} is down` });
       continue;
     }
@@ -123,6 +123,9 @@ function addrMatch(spec, ip) {
   return wildcardMatch(ip, spec.addr, spec.wild);
 }
 
+// ICMP message names an ACE can use -> the packet icmpType values they match.
+const ICMP_MATCH = { unreachable: ['net-unreachable', 'host-unreachable', 'port-unreachable'], 'time-exceeded': ['ttl-exceeded'], 'ttl-exceeded': ['ttl-exceeded'] };
+
 export function aceMatches(acl, e, pkt) {
   if (e.remark) return false;
   if (acl.kind === 'standard') return addrMatch(e.src, pkt.src);
@@ -131,7 +134,9 @@ export function aceMatches(acl, e, pkt) {
   if (e.proto === 'tcp' || e.proto === 'udp') {
     if (!portMatch(e.sop, pkt.sport) || !portMatch(e.dop, pkt.dport)) return false;
   }
-  if (e.proto === 'icmp' && e.icmpType && pkt.icmpType !== e.icmpType) return false;
+  // `established` matches only segments with ACK or RST set, i.e. not a connection-opening SYN.
+  if (e.established && !(pkt.flags || []).some(f => f === 'ack' || f === 'rst')) return false;
+  if (e.proto === 'icmp' && e.icmpType && !(ICMP_MATCH[e.icmpType] || [e.icmpType]).includes(pkt.icmpType)) return false;
   return true;
 }
 

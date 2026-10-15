@@ -111,15 +111,15 @@ export const MISSIONS = [
     hints: [
       'At DISPATCH-01 run "ipconfig /all". An "Autoconfiguration IPv4 Address" in 169.254.0.0/16 (APIPA) means the PC asked for DHCP and nobody answered.',
       'The DHCP server is CORE-SRV. Check it: "systemctl status isc-dhcp-server", and read why it stopped: "journalctl -u isc-dhcp-server". Logs usually name the exact file and line.',
-      'Open the file with "nano /etc/dhcp/dhcpd.conf", add the missing ";" on the line the log names, save, test with "dhcpd -t -cf /etc/dhcp/dhcpd.conf", then "systemctl start isc-dhcp-server" and "ipconfig /renew" on DISPATCH-01.',
+      'Open the file with "nano /etc/dhcp/dhcpd.conf". A parser reports where it noticed the error, which for a missing ";" is the next token: the log names line 14 (a "}"), so the statement missing its ";" ends on line 13. Fix it, save, test with "dhcpd -t -cf /etc/dhcp/dhcpd.conf", then "systemctl start isc-dhcp-server" and "ipconfig /renew" on DISPATCH-01.',
     ],
     debrief: {
       failure: 'isc-dhcp-server had crashed on a config syntax error (missing semicolon), so DISCOVER broadcasts went unanswered and Windows fell back to APIPA.',
-      evidence: '169.254.x.x address with no gateway; "systemctl status" = failed; journal: "dhcpd.conf line 14: semicolon expected."',
+      evidence: '169.254.x.x address with no gateway; "systemctl status" = failed; journal: "dhcpd.conf line 14: semicolon expected." pointing at the "}" that followed the unterminated "option routers" line 13.',
       fix: 'Correct the config, validate it with dhcpd -t before restarting, start the service, renew the client.',
       why: 'DHCP is DORA: Discover (broadcast) → Offer → Request → Ack. No Offer means no lease; the client self-assigns a link-local address that cannot leave the subnet.',
       real: ['Windows: ipconfig /all · ipconfig /release · ipconfig /renew', 'Linux: systemctl status · journalctl -u · dhcpd -t -cf <file>', 'Ports: client UDP 68 ↔ server UDP 67'],
-      pitfalls: ['Restarting a service without testing the config first: it just fails again.', 'APIPA clients retry on their own every few minutes; renew to test now.'],
+      pitfalls: ['Restarting a service without testing the config first: it just fails again.', 'Editing only the line the error names: parsers report where they noticed the problem, often the line after the real mistake.', 'APIPA clients retry on their own every few minutes; renew to test now.'],
     },
     reference(eng) {
       saveFile(eng, 'CORE-SRV', '/etc/dhcp/dhcpd.conf', dhcpdConf(eng.s.params));
@@ -181,7 +181,7 @@ export const MISSIONS = [
     ],
     debrief: {
       failure: 'The default route pointed at 198.51.100.5, a typo outside the 198.51.100.0/30 WAN subnet. IOS accepted the command but could not install the route, so there was no gateway of last resort.',
-      evidence: 'tracert ended at hop 1 with "Destination net unreachable" from EDGE-RTR; "show ip route": "Gateway of last resort is not set" while running-config showed the route.',
+      evidence: 'tracert listed EDGE-RTR (10.42.10.1) at hop 1, then hop 2 "10.42.10.1 reports: Destination net unreachable.": the gateway itself had no route onward. "show ip route": "Gateway of last resort is not set" while running-config showed the route.',
       fix: 'Replace the static default route with the provider next hop 198.51.100.1 and verify end to end at the application.',
       why: 'A static route is only installed if its next hop is reachable via a connected (or recursively resolved) route. Configured ≠ installed: always check the routing table, not just the config.',
       real: ['Cisco: show ip route · show running-config | include ip route · traceroute', 'Windows: tracert · pathping', 'PAT translated inside addresses to 198.51.100.2 on the way out (show ip nat translations).'],
@@ -288,14 +288,20 @@ export const MISSIONS = [
     outcome(eng, ctx) {
       const sw = ['ACCESS-SW', 'DIST-SW-B'].map(id => eng.s.devices[id]);
       const stpOn = sw.map(d => !(d.stp.disabled || []).some(([a, b]) => V(eng, 'clinic') >= a && V(eng, 'clinic') <= b));
-      const rapid = sw.some((d, i) => stpOn[i] && d.stp.mode === 'rapid-pvst');
-      const method = stpOn.some(Boolean) ? (rapid ? 'Re-enabled spanning tree (Rapid PVST+)' : 'Re-enabled spanning tree (PVST+)') : 'Removed the redundant path by hand';
+      const rapid = sw.map((d, i) => stpOn[i] && d.stp.mode === 'rapid-pvst');
+      const legacy = sw.filter((d, i) => stpOn[i] && !rapid[i]).map(d => d.hostname);
+      // Only Rapid PVST+ on both switches guarantees a rapid failover: ports on, or facing, a legacy switch use 802.1D timers.
+      const method = !stpOn.some(Boolean) ? 'Removed the redundant path by hand'
+        : rapid.every(Boolean) ? 'Re-enabled spanning tree (Rapid PVST+ on both switches)'
+          : rapid.some(Boolean) ? `Re-enabled spanning tree with mixed modes (${legacy.join(', ')} still runs legacy 802.1D pvst)`
+            : 'Re-enabled spanning tree (PVST+)';
       return {
         method,
         outage: ctx.outage,
         compare: [
           { option: 'Rapid PVST+ on both switches', outage: '≈1–2 s', redundancy: 'kept' },
           { option: 'PVST+ (802.1D timers)', outage: '≈30 s (15 s listening + 15 s learning)', redundancy: 'kept' },
+          { option: 'Mixed modes (one switch still PVST+)', outage: 'up to ≈30 s: ports facing the legacy switch use 802.1D timers', redundancy: 'kept' },
           { option: 'Shut / unplug one riser', outage: 'until a human notices and re-enables the other riser', redundancy: 'lost' },
         ],
       };
@@ -303,18 +309,20 @@ export const MISSIONS = [
     hints: [
       'Everything in VLAN 10 failed at the same instant and links are still "up". On ACCESS-SW: "show logging" and "show processes cpu sorted". What does a host MAC "flapping between Gi0/23 and Gi0/24" mean?',
       'The two risers form a Layer 2 loop. "show spanning-tree vlan 10" says no instance exists: STP is disabled, so broadcasts circle forever and multiply.',
-      'Either re-enable STP ("spanning-tree vlan 1-4094" in config mode on both switches; "spanning-tree mode rapid-pvst" converges far faster), or as a stopgap shut one riser port. Then curl the clinic from NURSE-STATION. Consider what each choice does if a riser fails later.',
+      'Either re-enable STP ("spanning-tree vlan 1-4094" in config mode on both switches), or as a stopgap shut one riser port. "spanning-tree mode rapid-pvst" on BOTH switches makes a riser failover take about a second; RSTP is only rapid between RSTP speakers. Enabling STP restarts every port: PortFast host ports forward at once, but the trunk to EDGE-RTR (a router sends no BPDUs) waits 30 s unless you mark it as an edge port ("interface g0/1", "spanning-tree portfast trunk" on ACCESS-SW). Then curl the clinic from NURSE-STATION. Consider what each choice does if a riser fails later.',
     ],
     debrief: {
       failure: 'Two parallel links between switches with spanning tree disabled created a Layer 2 loop. Broadcast and unknown-unicast frames looped and multiplied, saturating links and switch CPUs.',
       evidence: 'Every VLAN 10 service failed at once while all links stayed up; %SW_MATM-4-MACFLAP_NOTIF between the two risers; CPU at 99%; "Spanning tree instance(s) for vlan 10 does not exist."',
       fix: 'Restore loop prevention (STP/RSTP) so one riser blocks and takes over on failure, or remove the redundant path manually.',
-      why: 'Ethernet frames have no TTL. STP elects a root bridge and blocks redundant ports, keeping redundancy without loops. Classic 802.1D waits 30 s (listening + learning) before forwarding; Rapid PVST+ converges in about a second on point-to-point links.',
-      real: ['Cisco: show spanning-tree · show logging · show processes cpu sorted · show interfaces (broadcast counters)', 'Edge ports: spanning-tree portfast + bpduguard enable. Never disable STP to "speed up" ports; use PortFast on host ports instead.'],
-      pitfalls: ['Rebooting the switches: the loop comes straight back.', 'Disabling STP to make ports come up faster: PortFast on edge ports is the correct fix for that.'],
+      why: 'Ethernet frames have no TTL. STP elects a root bridge and blocks redundant ports, keeping redundancy without loops. Classic 802.1D waits 30 s (listening + learning) before a port forwards. Rapid PVST+ (802.1w) is fast only where it can be: an alternate port takes over as root port at once, and a designated port forwards after a proposal/agreement handshake, which needs a Rapid PVST+ neighbour on a point-to-point (full-duplex) link. Toward a legacy PVST+ switch, a router or a host without PortFast it falls back to the same 30 s.',
+      real: ['Cisco: show spanning-tree (Type column: P2p, Shr, Edge, "Peer(STP)" = legacy neighbour) · show logging · show processes cpu sorted · show interfaces (broadcast counters)', 'Edge ports: spanning-tree portfast (access) or spanning-tree portfast trunk (a trunk to a router or server) + bpduguard enable. Never disable STP to "speed up" ports; use PortFast on edge ports instead.'],
+      pitfalls: ['Rebooting the switches: the loop comes straight back.', 'Disabling STP to make ports come up faster: PortFast on edge ports is the correct fix for that.', 'Rapid PVST+ on only one switch: the riser between them still runs 802.1D timers.'],
     },
     reference(eng) {
       const run = cli(eng);
+      // The router-on-a-stick trunk is an edge port (routers do not bridge or send BPDUs): forward at once.
+      run('ACCESS-SW', 'enable', 'configure terminal', 'interface g0/1', 'spanning-tree portfast trunk', 'end');
       for (const sw of ['ACCESS-SW', 'DIST-SW-B']) run(sw, 'enable', 'configure terminal', 'spanning-tree mode rapid-pvst', 'spanning-tree vlan 1-4094', 'end');
       eng.advance(3);
     },
@@ -377,7 +385,7 @@ export const MISSIONS = [
     evidence: [{ label: 'Confirm all 50 feeds (CCTV wall in Sector B, or dhcp-lease-list on CORE-SRV)', match: ev => (ev.type === 'view' && ev.what === 'cctv') || (ev.host === 'CORE-SRV' && ev.type === 'command' && /lease|journalctl/.test(ev.line)) }],
     hints: [
       'Only some cameras stream. On CORE-SRV: "journalctl -u isc-dhcp-server | grep -i free". What does "no free leases" say about the scope?',
-      'The camera scope is a /27: 30 usable addresses, and the pool (.10–.30) is only 21. Fifty cameras need at least a /26 (62 usable). 10.42.40.64/27 already belongs to the door controllers (EDGE-RTR Gi0/1.41), so 10.42.40.0/26 or /25 would overlap it. Pick a free block.',
+      'The camera scope is a /27: 30 usable addresses, and the pool (.10–.30) is only 21. Fifty cameras need at least a /26 (62 usable). 10.42.40.64/27 (.64–.95) already belongs to the door controllers (EDGE-RTR Gi0/1.41). A /26 starts on a multiple of 64: 10.42.40.0/26 (.0–.63) and 10.42.40.128/26 (.128–.191) are both free, but 10.42.40.64/26 or 10.42.40.0/25 would contain the door block. Pick a free block.',
       'Example: 10.42.40.128/26. EDGE-RTR: "interface g0/1.40", "ip address 10.42.40.129 255.255.255.192". dhcpd.conf: "subnet 10.42.40.128 netmask 255.255.255.192", "range 10.42.40.140 10.42.40.190;", "option routers 10.42.40.129;". Restart the service. Cameras renew at T1 (5 min) — or bounce their PoE port (DIST-SW-B: "interface g0/4", "shutdown", "no shutdown").',
     ],
     debrief: {
@@ -506,19 +514,19 @@ export const MISSIONS = [
     hints: [
       'At GUEST-KIOSK, "ipconfig /all". Look at "DHCP Server" and "Default Gateway". Do they belong to this network?',
       'Something on the guest VLAN answers DHCP before our relay can. Find its port from the switch: "show mac address-table vlan 30" (or "interface g0/9", "g0/10"...). The rogue\'s MAC will be on a lobby jack, not on Gi0/1 or Gi0/6.',
-      'Contain: shut that port. Prevent: DHCP snooping on ACCESS-SW: "ip dhcp snooping", "ip dhcp snooping vlan 30", then trust only the uplink where legitimate offers arrive: "interface g0/1", "ip dhcp snooping trust". Then "ipconfig /release" and "ipconfig /renew" on the kiosk.',
+      'Contain: shut that port. Prevent: DHCP snooping on ACCESS-SW: "ip dhcp snooping", "ip dhcp snooping vlan 30", then trust only the uplink where legitimate offers arrive: "interface g0/1", "ip dhcp snooping trust". Our server sits behind an IOS relay (EDGE-RTR), and snooping inserts option 82 with giaddr 0, which that relay drops by default: also enter "no ip dhcp snooping information option" on ACCESS-SW. Then "ipconfig /release" and "ipconfig /renew" on the kiosk.',
     ],
     debrief: {
       failure: 'A consumer travel router running its own DHCP server was plugged into a guest-VLAN wall jack. It answered Discovers faster than the relayed server, handing guests its own gateway and DNS: a classic on-path position.',
       evidence: 'Kiosk lease 192.168.8.x with DHCP Server 192.168.8.1; that MAC learned on a lobby access port; no matching lease in CORE-SRV\'s journal.',
-      fix: 'Contain by shutting the port; prevent with DHCP snooping on the guest VLAN, trusting only the port facing the legitimate server/relay.',
-      why: 'DHCP has no authentication; clients take the first offer. Snooping drops server-side DHCP messages (Offer/Ack) arriving on untrusted ports and builds a binding table that DAI and IP Source Guard can use.',
-      real: ['Cisco: ip dhcp snooping · ip dhcp snooping vlan · ip dhcp snooping trust · show ip dhcp snooping', 'Real-world gotcha: with the relay upstream, snooping inserts option 82; some relays then drop requests (no ip dhcp snooping information option / ip dhcp relay information trusted). Not modelled here.'],
-      pitfalls: ['Enabling snooping without trusting the uplink: legitimate offers get dropped too and everyone falls back to APIPA.', 'Only shutting the port: the rogue moves to the next jack.'],
+      fix: 'Contain by shutting the port; prevent with DHCP snooping on the guest VLAN, trusting only the port facing the legitimate server/relay, and turning off option 82 insertion because the legitimate server sits behind an IOS relay.',
+      why: 'DHCP has no authentication; clients take the first offer. Snooping drops server-side DHCP messages (Offer/Ack) arriving on untrusted ports and builds a binding table that DAI and IP Source Guard can use. By default it also inserts option 82 (relay agent information) but leaves giaddr 0.0.0.0; an IOS relay drops such requests on interfaces not trusted for relay information.',
+      real: ['Cisco: ip dhcp snooping · ip dhcp snooping vlan · ip dhcp snooping trust · show ip dhcp snooping ("Insertion of option 82 is ...")', 'Option 82 with an upstream IOS relay: "no ip dhcp snooping information option" on the access switch, or "ip dhcp relay information trusted" on the relay interface ("ip dhcp relay information trust-all" globally).'],
+      pitfalls: ['Enabling snooping without trusting the uplink: legitimate offers get dropped too and everyone falls back to APIPA.', 'Leaving option 82 insertion on with an IOS relay upstream: the relay silently drops every request from the snooped VLAN.', 'Only shutting the port: the rogue moves to the next jack.'],
     },
     reference(eng) {
       const run = cli(eng);
-      run('ACCESS-SW', 'enable', 'configure terminal', 'ip dhcp snooping', `ip dhcp snooping vlan ${V(eng, 'guest')}`, 'interface g0/1', 'ip dhcp snooping trust', 'end');
+      run('ACCESS-SW', 'enable', 'configure terminal', 'ip dhcp snooping', `ip dhcp snooping vlan ${V(eng, 'guest')}`, 'no ip dhcp snooping information option', 'interface g0/1', 'ip dhcp snooping trust', 'end');
       run('GUEST-KIOSK', 'ipconfig /release', 'ipconfig /renew');
     },
   },

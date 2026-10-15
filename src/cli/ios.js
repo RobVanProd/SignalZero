@@ -5,6 +5,7 @@ import * as S from './ios-show.js';
 import { fmtIp, parseIp, maskToPrefix, networkOf, overlaps, fmtMask, inSubnet } from '../engine/ipv4.js';
 import { longIf, canonIf, parentIf, portDefaults } from '../engine/model.js';
 import { initialTtl } from '../engine/trace.js';
+import { l3Ifaces } from '../engine/routing.js';
 
 const PORT_NUM = { www: 80, http: 80, domain: 53, bootps: 67, bootpc: 68, telnet: 23, smtp: 25, ftp: 21, tftp: 69, ntp: 123, snmp: 161, syslog: 514, pop3: 110, bgp: 179, isakmp: 500 };
 
@@ -61,6 +62,8 @@ function parsePortSpec(toks, i) {
   return { spec: { op, ports }, next: j };
 }
 
+const ICMP_NAMES = ['echo', 'echo-reply', 'unreachable', 'net-unreachable', 'host-unreachable', 'port-unreachable', 'time-exceeded', 'ttl-exceeded'];
+
 /** Parse "permit tcp any host 1.2.3.4 eq 443" etc. Returns { ace } or { errTok } (token index). */
 export function parseAce(kind, toks) {
   const action = toks[0]?.toLowerCase();
@@ -73,8 +76,9 @@ export function parseAce(kind, toks) {
       if (ip !== null && toks.length === 2) return { ace: { action, src: { addr: ip, wild: 0 } } };
       return { errTok: a.err };
     }
-    if (a.next < toks.length && toks[a.next].toLowerCase() !== 'log') return { errTok: a.next };
-    return { ace: { action, src: a.spec } };
+    const log = toks[a.next]?.toLowerCase() === 'log';
+    if (a.next + (log ? 1 : 0) < toks.length) return { errTok: a.next + (log ? 1 : 0) };
+    return { ace: { action, src: a.spec, ...(log ? { log } : {}) } };
   }
   const proto = toks[1]?.toLowerCase();
   if (!['ip', 'tcp', 'udp', 'icmp'].includes(proto)) return { errTok: 1 };
@@ -97,12 +101,17 @@ export function parseAce(kind, toks) {
     dop = dp.spec; i = dp.next;
   }
   let icmpType = null;
-  if (proto === 'icmp' && toks[i] && ['echo', 'echo-reply', 'unreachable', 'time-exceeded'].includes(toks[i].toLowerCase())) { icmpType = toks[i].toLowerCase(); i++; }
+  if (proto === 'icmp' && toks[i] && ICMP_NAMES.includes(toks[i].toLowerCase())) { icmpType = toks[i].toLowerCase(); i++; }
+  // Trailing options, in any order: `established` (TCP only) and `log`.
   let log = false;
-  if (toks[i]?.toLowerCase() === 'log') { log = true; i++; }
-  if (toks[i]?.toLowerCase() === 'established') i++;
-  if (i < toks.length) return { errTok: i };
-  return { ace: { action, proto, src: s.spec, sop, dst: d.spec, dop, icmpType, log } };
+  let established = false;
+  for (; i < toks.length; i++) {
+    const t = toks[i].toLowerCase();
+    if (t === 'log' && !log) log = true;
+    else if (t === 'established' && proto === 'tcp' && !established) established = true;
+    else return { errTok: i };
+  }
+  return { ace: { action, proto, src: s.spec, sop, dst: d.spec, dop, icmpType, log, ...(established ? { established } : {}) } };
 }
 
 function sameAce(a, b) {
@@ -158,6 +167,9 @@ function buildGrammar(kind) {
   g.add('exec', 'copy running-config startup-config', 'write');
   g.add(ex, 'ping <IP>', 'ping');
   g.add(ex, 'traceroute <IP>', 'trace');
+  g.add('exec', 'show running-config interface <IF>', 'sh-run-if');
+  // Valid IOS that this image does not simulate: answer with a labelled note, never a fake syntax error.
+  const unimpl = (modes, template, alt) => g.add(modes, template, 'unimpl', { alt });
   if (kind === 'switch') {
     g.add(ex, 'show interfaces status', 'sh-int-status');
     g.add(ex, 'show interfaces trunk', 'sh-int-trunk');
@@ -170,6 +182,19 @@ function buildGrammar(kind) {
     g.add(ex, 'show mac address-table interface <IF>', 'sh-mac');
     g.add(ex, 'show mac address-table vlan <VLAN>', 'sh-mac');
     g.add(ex, 'show mac address-table address <WORD:mac>', 'sh-mac');
+    g.add(ex, 'show mac address-table dynamic', 'sh-mac');
+    g.add(ex, 'show mac address-table dynamic interface <IF>', 'sh-mac');
+    g.add(ex, 'show mac address-table dynamic vlan <VLAN>', 'sh-mac');
+    g.add(ex, 'show mac address-table dynamic address <WORD:mac>', 'sh-mac');
+    g.add(ex, 'show interfaces <IF> switchport', 'sh-int-sw');
+    g.add(ex, 'show interfaces <IF> status', 'sh-int-status');
+    g.add(ex, 'show interfaces status err-disabled', 'sh-int-errdis');
+    unimpl(ex, 'show spanning-tree interface <IF>', 'show spanning-tree vlan <id>');
+    unimpl(ex, 'show spanning-tree root', 'show spanning-tree vlan <id>');
+    unimpl(ex, 'show spanning-tree blockedports', 'show spanning-tree vlan <id>');
+    unimpl(ex, 'show ip dhcp snooping binding', 'show ip dhcp snooping');
+    unimpl(ex, 'show vlan id <VLAN>', 'show vlan brief');
+    unimpl(ex, 'show errdisable recovery', 'show interfaces status err-disabled');
     g.add(ex, 'show ip dhcp snooping', 'sh-snoop');
     g.add(ex, 'show vtp status', 'sh-vtp');
     g.add('exec', 'test cable-diagnostics tdr interface <IF>', 'tdr-run');
@@ -177,6 +202,18 @@ function buildGrammar(kind) {
   }
   if (kind === 'router') {
     g.add(ex, 'show ip route', 'sh-route');
+    g.add(ex, 'show ip route static', 'sh-route');
+    g.add(ex, 'show ip route connected', 'sh-route');
+    g.add(ex, 'show ip route <IP>', 'sh-route-entry');
+    g.add(ex, 'show ip interface', 'sh-ipint');
+    g.add(ex, 'show ip interface <IF>', 'sh-ipint');
+    g.add(ex, 'show ip access-lists <WORD:name>', 'sh-acl');
+    g.add(ex, 'ping <IP> source <NH:src>', 'ping');
+    unimpl(ex, 'show ip nat statistics', 'show ip nat translations');
+    unimpl('exec', 'clear ip nat translation *', 'show ip nat translations');
+    unimpl(ex, 'show ip protocols', 'show ip route (this network uses static routes only)');
+    unimpl(ex, 'show standby', 'show ip interface brief (no HSRP is configured here)');
+    unimpl(ex, 'show standby brief', 'show ip interface brief (no HSRP is configured here)');
     g.add(ex, 'show ip arp', 'sh-arp');
     g.add(ex, 'show arp', 'sh-arp');
     g.add(ex, 'show access-lists', 'sh-acl');
@@ -207,11 +244,14 @@ function buildGrammar(kind) {
     g.add(cfg, 'no spanning-tree vlan <VLIST>', 'stp-off');
     g.add(cfg, 'spanning-tree vlan <VLIST> priority <NUM:prio>', 'stp-prio');
     g.add(cfg, 'spanning-tree vlan <VLIST> root primary', 'stp-root');
+    g.add(cfg, 'spanning-tree vlan <VLIST> root secondary', 'stp-root');
     g.add(cfg, 'no spanning-tree vlan <VLIST> priority', 'stp-prio-clear');
     g.add(cfg, 'ip dhcp snooping', 'snoop-on');
     g.add(cfg, 'no ip dhcp snooping', 'snoop-off');
     g.add(cfg, 'ip dhcp snooping vlan <VLIST>', 'snoop-vlan');
     g.add(cfg, 'no ip dhcp snooping vlan <VLIST>', 'snoop-novlan');
+    g.add(cfg, 'ip dhcp snooping information option', 'snoop-o82');
+    g.add(cfg, 'no ip dhcp snooping information option', 'snoop-o82');
     g.add(cfg, 'vtp mode transparent', 'noop');
   }
   if (kind === 'router') {
@@ -226,6 +266,8 @@ function buildGrammar(kind) {
     g.add(cfg, 'no ip access-list standard <WORD:name>', 'no-acl');
     g.add(cfg, 'access-list <NUM:num> <LINE:rest>', 'acl-num');
     g.add(cfg, 'no access-list <NUM:num>', 'no-acl-num');
+    g.add(cfg, 'ip dhcp relay information trust-all', 'relay-trust-all');
+    g.add(cfg, 'no ip dhcp relay information trust-all', 'relay-trust-all');
     g.add(cfg, 'ip nat inside source list <WORD:acl> interface <IF> overload', 'nat-rule');
     g.add(cfg, 'no ip nat inside source list <WORD:acl> interface <IF> overload', 'no-nat-rule');
     g.add(['acl-ext', 'acl-std'], 'permit <LINE:rest>', 'ace');
@@ -278,6 +320,8 @@ function buildGrammar(kind) {
   if (kind === 'router') {
     g.add(ifm, 'ip address <IP> <MASK>', 'ip-addr');
     g.add(ifm, 'no ip address', 'no-ip-addr');
+    g.add(ifm, 'ip dhcp relay information trusted', 'relay-trust');
+    g.add(ifm, 'no ip dhcp relay information trusted', 'relay-trust');
     g.add(ifm, 'ip helper-address <IP>', 'helper');
     g.add(ifm, 'no ip helper-address <IP>', 'no-helper');
     g.add(ifm, 'no ip helper-address', 'no-helper');
@@ -353,7 +397,7 @@ export function iosExecute(eng, sess, raw) {
     if (sess.mode === 'user' && /^\s*(conf|sh\w*\s+run|wr)/i.test(line)) return { lines: [...caretLines(prompt, line, m.pos), '(Hint: privileged commands need "enable" first.)'].map((x, i) => (i === 2 ? { t: 'note', text: x } : x)), prompt };
     return { lines: caretLines(prompt, line, m.pos), prompt };
   }
-  const ctx = { eng, dev, sess, args: m.args, line: line.trim(), raw, prompt };
+  const ctx = { eng, dev, sess, args: m.args, line: line.trim(), raw, prompt, cmd: m.cmd };
   const out = run(m.cmd.handler, ctx);
   const lines = applyPipe(out.lines || [], pipe);
   return { ...out, lines, prompt: promptFor(dev, sess) };
@@ -396,6 +440,16 @@ function run(handler, ctx) {
 
     // ---------------- show
     case 'sh-run': L.push(...S.runningConfig(eng, dev)); return done();
+    case 'sh-run-if': L.push(...S.runningConfigInterface(eng, dev, args.if)); return done();
+    case 'sh-int-sw': L.push(...S.showSwitchport(eng, dev, args.if)); return done();
+    case 'sh-int-errdis': {
+      L.push(`${'Port'.padEnd(10)}${'Name'.padEnd(19)}${'Status'.padEnd(13)}${'Reason'.padEnd(21)}Err-disabled Vlans`);
+      for (const p of Object.values(dev.ports)) if (p.errDisabled) L.push(`${p.name.padEnd(10)}${p.description.slice(0, 18).padEnd(19)}${'err-disabled'.padEnd(13)}${p.errDisabled}`);
+      return done();
+    }
+    case 'sh-ipint': L.push(...S.showIpInterface(eng, dev, args.if)); return done();
+    case 'sh-route-entry': L.push(...S.showIpRouteEntry(eng, dev, args.ip)); eng.event({ type: 'show', host: dev.id, what: 'route' }); return done();
+    case 'unimpl': note(`training image: "${ctx.line}" is valid IOS but is not simulated here.${ctx.cmd.alt ? ` Try: ${ctx.cmd.alt}` : ''}`); return done();
     case 'sh-start': {
       if (!dev.startup) { L.push(...S.runningConfig(eng, dev).slice(2)); return done(); }
       L.push(...dev.startup);
@@ -406,7 +460,7 @@ function run(handler, ctx) {
     case 'sh-ipib': L.push(...S.showIpIntBrief(eng, dev)); return done();
     case 'sh-int': L.push(...S.showInterface(eng, dev, args.if)); return done();
     case 'sh-int-all': for (const p of Object.values(dev.ports)) if (p.kind === 'eth') L.push(...S.showInterface(eng, dev, p.name)); return done();
-    case 'sh-int-status': L.push(...S.showIntStatus(eng, dev)); return done();
+    case 'sh-int-status': { const t = S.showIntStatus(eng, dev); L.push(...(args.if ? [t[0], ...t.slice(1).filter(l => l.startsWith(`${args.if} `))] : t)); return done(); }
     case 'sh-int-trunk': L.push(...S.showIntTrunk(eng, dev)); return done();
     case 'sh-vlan': L.push(...S.showVlanBrief(eng, dev)); return done();
     case 'sh-stp': L.push(...S.showSpanningTree(eng, dev, args.vlan)); eng.event({ type: 'show', host: dev.id, what: 'stp' }); return done();
@@ -438,7 +492,8 @@ function run(handler, ctx) {
     case 'sh-cpu': L.push(...S.showCpu(eng, dev)); return done();
     case 'write': L.push('Building configuration...', '[OK]'); dev.startup = S.runningConfig(eng, dev).slice(2); dev.savedSeq = eng.s.changeSeq; eng.event({ type: 'save', host: dev.id }); return done();
     case 'sh-route': {
-      const r = S.showIpRoute(eng, dev);
+      const only = /\bstatic\s*$/i.test(ctx.line) ? ['S'] : /\bconnected\s*$/i.test(ctx.line) ? ['C', 'L'] : null;
+      const r = S.showIpRoute(eng, dev, only);
       L.push(...r.lines);
       eng.event({ type: 'show', host: dev.id, what: 'route' });
       return done({ meta: { notInstalled: r.notInstalled } });
@@ -461,12 +516,19 @@ function run(handler, ctx) {
       return done();
     }
     case 'ping': {
+      let srcIp;
+      if (args.src !== undefined) {
+        const ifc = l3Ifaces(eng, dev).find(i => i.up && (typeof args.src === 'number' ? i.addr === args.src : i.name === args.src));
+        if (!ifc) { L.push(typeof args.src === 'number' ? '% Invalid source address- IP address not on any of our up interfaces' : '% Invalid source interface - IP not enabled or interface is down'); return done(); }
+        srcIp = ifc.addr;
+      }
       L.push('Type escape sequence to abort.', `Sending 5, 100-byte ICMP Echos to ${fmtIp(args.ip)}, timeout is 2 seconds:`);
+      if (srcIp !== undefined) L.push(`Packet sent with a source address of ${fmtIp(srcIp)} `);
       let marks = '';
       let ok = 0;
       const rtts = [];
       for (let i = 0; i < 5; i++) {
-        const r = eng.probe({ from: dev.id, dst: args.ip, proto: 'icmp', record: true });
+        const r = eng.probe({ from: dev.id, dst: args.ip, proto: 'icmp', record: true, srcIp });
         if (r.status === 'ok' && r.kind === 'reply' && eng.rand() < r.pass) { marks += '!'; ok++; rtts.push(Math.max(1, Math.round(r.rttMs + eng.rand() * (r.jitter || 0.2)))); }
         else if (r.status === 'ok' && r.kind === 'net-unreachable') marks += 'U';
         else marks += '.';
@@ -501,7 +563,7 @@ function run(handler, ctx) {
       if (name !== parent) {
         if (dev.kind !== 'router') return { lines: ['% Subinterfaces are not supported on this switch port.'] };
         if (!dev.subifs[name]) {
-          dev.subifs[name] = { name, parent, vlan: null, native: false, adminUp: true, ip: null, helpers: [], aclIn: null, aclOut: null, nat: null, proxyArp: false, unreachables: true, description: '' };
+          dev.subifs[name] = { name, parent, vlan: null, native: false, adminUp: true, ip: null, helpers: [], aclIn: null, aclOut: null, nat: null, proxyArp: true, unreachables: true, description: '' };
           mut(ctx, `create ${name}`);
         }
         sess.mode = 'if';
@@ -558,12 +620,32 @@ function run(handler, ctx) {
       mut(ctx);
       return done();
     }
-    case 'stp-root': for (const v of args.vlist) dev.stp.priority[v] = 24576; mut(ctx); return done();
+    case 'stp-root': {
+      // The macro writes a plain priority. secondary: 28672. primary: 24576 if that wins the election,
+      // otherwise 4096 below the best other bridge (the current root) in this VLAN.
+      const secondary = /secondary\s*$/i.test(ctx.line);
+      eng.ensure();
+      for (const v of args.vlist) {
+        let prio = secondary ? 28672 : 24576;
+        const info = eng.stpInfo?.[v];
+        const mine = info?.rootOf?.[dev.id];
+        const others = mine ? Object.keys(info.rootOf).filter(id => id !== dev.id && info.rootOf[id] === mine).map(id => eng.s.devices[id]) : [];
+        const best = others.map(o => [o.stp.priority?.[v] ?? 32768, parseInt(o.mac, 16)]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0];
+        if (!secondary && best && (best[0] < prio || (best[0] === prio && best[1] < parseInt(dev.mac, 16)))) prio = best[0] - 4096;
+        if (prio < 0) { note(`training image: VLAN ${v} root already uses priority 0; this switch cannot undercut it (priority left unchanged).`); continue; }
+        dev.stp.priority[v] = prio;
+      }
+      mut(ctx);
+      return done();
+    }
     case 'stp-prio-clear': for (const v of args.vlist) delete dev.stp.priority[v]; mut(ctx); return done();
     case 'snoop-on': dev.snoop.enabled = true; mut(ctx); return done();
     case 'snoop-off': dev.snoop.enabled = false; mut(ctx); return done();
     case 'snoop-vlan': dev.snoop.vlans = [...new Set([...dev.snoop.vlans, ...args.vlist])].sort((a, b) => a - b); mut(ctx); return done();
     case 'snoop-novlan': dev.snoop.vlans = dev.snoop.vlans.filter(v => !args.vlist.includes(v)); mut(ctx); return done();
+    case 'snoop-o82': dev.snoop.opt82 = !/^no\s/i.test(ctx.line); mut(ctx); return done();
+    case 'relay-trust-all': dev.relayTrustAll = !/^no\s/i.test(ctx.line); mut(ctx); return done();
+    case 'relay-trust': for (const p of ifTargets(ctx)) p.relayTrust = !/^no\s/i.test(ctx.line); mut(ctx); return done();
 
     case 'route':
     case 'route-ifnh': {
@@ -679,15 +761,9 @@ function run(handler, ctx) {
     case 'no-nat-rule': dev.nat = dev.nat.filter(r => !(r.acl === args.acl && r.iface === args.if)); mut(ctx); return done();
 
     // ---------------- interface
-    case 'shut': for (const p of ifTargets(ctx)) p.adminUp = false; mut(ctx); return done();
-    case 'noshut': {
-      for (const p of ifTargets(ctx)) {
-        if (p.errDisabled) { p.errDisabled = null; }
-        p.adminUp = true;
-      }
-      mut(ctx);
-      return done();
-    }
+    // Recovering an err-disabled port takes "shutdown" then "no shutdown"; "no shutdown" alone leaves it err-disabled.
+    case 'shut': for (const p of ifTargets(ctx)) { p.adminUp = false; p.errDisabled = null; } mut(ctx); return done();
+    case 'noshut': for (const p of ifTargets(ctx)) p.adminUp = true; mut(ctx); return done();
     case 'desc': for (const p of ifTargets(ctx)) p.description = args.text; mut(ctx); return done();
     case 'nodesc': for (const p of ifTargets(ctx)) p.description = ''; mut(ctx); return done();
     case 'speed': case 'speed-auto': {

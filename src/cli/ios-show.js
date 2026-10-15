@@ -2,7 +2,7 @@
 import { fmtIp, fmtMask, networkOf, fmtRangeList, inSubnet } from '../engine/ipv4.js';
 import { longIf, macCisco } from '../engine/model.js';
 import { carries, stpDisabled, stpRecord, bridgePriority, portCost, knowsVlan, allVlans } from '../engine/switching.js';
-import { l3Ifaces, describeAddr, hostAddr } from '../engine/routing.js';
+import { l3Ifaces, describeAddr, hostAddr, lookup } from '../engine/routing.js';
 import { wallClock } from '../engine/engine.js';
 
 const pad = (s, n) => String(s).padEnd(n);
@@ -26,28 +26,87 @@ export function portOpText(spec) {
 
 export function aceText(acl, e) {
   if (e.remark) return `remark ${e.remark}`;
+  const log = e.log ? ' log' : '';
   if (acl.kind === 'standard') {
-    if (e.src.any) return `${e.action} any`;
-    if (e.src.wild === 0) return `${e.action} host ${fmtIp(e.src.addr)}`;
-    return `${e.action} ${fmtIp(e.src.addr)} ${fmtIp(e.src.wild)}`;
+    if (e.src.any) return `${e.action} any${log}`;
+    if (e.src.wild === 0) return `${e.action} host ${fmtIp(e.src.addr)}${log}`;
+    return `${e.action} ${fmtIp(e.src.addr)} ${fmtIp(e.src.wild)}${log}`;
   }
   let t = `${e.action} ${e.proto} ${describeAddr(e.src, fmtIp)}${portOpText(e.sop)} ${describeAddr(e.dst, fmtIp)}${portOpText(e.dop)}`;
   if (e.icmpType) t += ` ${e.icmpType}`;
-  if (e.log) t += ' log';
-  return t;
+  if (e.established) t += ' established';
+  return t + log;
 }
 
 function aceShow(acl, e) {
   if (e.remark) return null;
+  const log = e.log ? ' log' : '';
   if (acl.kind === 'standard') {
-    if (e.src.any) return `${e.action} any`;
-    if (e.src.wild === 0) return `${e.action} ${fmtIp(e.src.addr)}`;
-    return `${e.action} ${fmtIp(e.src.addr)}, wildcard bits ${fmtIp(e.src.wild)}`;
+    if (e.src.any) return `${e.action} any${log}`;
+    if (e.src.wild === 0) return `${e.action} ${fmtIp(e.src.addr)}${log}`;
+    return `${e.action} ${fmtIp(e.src.addr)}, wildcard bits ${fmtIp(e.src.wild)}${log}`;
   }
   return aceText(acl, e);
 }
 
 // ------------------------------------------------------------------ running-config
+
+/** One interface's running-config block (no trailing "!"). */
+export function interfaceConfig(d, name) {
+  const p = d.ports[name];
+  const s = d.subifs?.[name];
+  const body = [`interface ${longIf(name)}`];
+  if (s) {
+    if (s.description) body.push(` description ${s.description}`);
+    if (s.vlan !== null) body.push(` encapsulation dot1Q ${s.vlan}${s.native ? ' native' : ''}`);
+    if (s.ip) body.push(` ip address ${fmtIp(s.ip.addr)} ${fmtMask(s.ip.len)}`);
+    for (const h of s.helpers || []) body.push(` ip helper-address ${fmtIp(h)}`);
+    if (s.relayTrust) body.push(' ip dhcp relay information trusted');
+    if (s.aclIn) body.push(` ip access-group ${s.aclIn} in`);
+    if (s.aclOut) body.push(` ip access-group ${s.aclOut} out`);
+    if (s.ip && !s.proxyArp) body.push(' no ip proxy-arp');
+    if (s.unreachables === false) body.push(' no ip unreachables');
+    if (s.nat) body.push(` ip nat ${s.nat}`);
+    if (!s.adminUp) body.push(' shutdown');
+    return body;
+  }
+  if (p.description) body.push(` description ${p.description}`);
+  if (d.kind === 'switch' && p.kind === 'eth') {
+    if (p.mode === 'trunk') {
+      if (p.native !== 1) body.push(` switchport trunk native vlan ${p.native}`);
+      if (p.allowed !== 'all') body.push(` switchport trunk allowed vlan ${p.allowed.length ? fmtRangeList(p.allowed) : 'none'}`);
+      body.push(' switchport mode trunk');
+    } else {
+      if (p.accessVlan !== 1) body.push(` switchport access vlan ${p.accessVlan}`);
+      body.push(' switchport mode access');
+    }
+    if (p.speed !== 'auto') body.push(` speed ${p.speed}`);
+    if (p.duplex !== 'auto') body.push(` duplex ${p.duplex}`);
+    if (!p.adminUp) body.push(' shutdown');
+    if (p.portfast) body.push(p.mode === 'trunk' ? ' spanning-tree portfast trunk' : ' spanning-tree portfast');
+    if (p.bpduguard) body.push(' spanning-tree bpduguard enable');
+    if (p.snoopTrust) body.push(' ip dhcp snooping trust');
+  } else if (d.kind === 'router' && p.kind === 'eth') {
+    if (p.ip) body.push(` ip address ${fmtIp(p.ip.addr)} ${fmtMask(p.ip.len)}`);
+    else body.push(' no ip address');
+    for (const h of p.helpers || []) body.push(` ip helper-address ${fmtIp(h)}`);
+    if (p.relayTrust) body.push(' ip dhcp relay information trusted');
+    if (p.aclIn) body.push(` ip access-group ${p.aclIn} in`);
+    if (p.aclOut) body.push(` ip access-group ${p.aclOut} out`);
+    if (p.ip && !p.proxyArp) body.push(' no ip proxy-arp');
+    if (p.nat) body.push(` ip nat ${p.nat}`);
+    if (!p.adminUp) body.push(' shutdown');
+    body.push(` duplex ${p.duplex}`, ` speed ${p.speed}`);
+  }
+  return body;
+}
+
+/** show running-config interface <if> */
+export function runningConfigInterface(eng, d, name) {
+  if (!d.ports[name] && !d.subifs?.[name]) return [`% Invalid input detected: no such interface`];
+  const body = ['!', ...interfaceConfig(d, name), 'end'];
+  return ['Building configuration...', '', `Current configuration : ${body.join('\n').length} bytes`, ...body];
+}
 
 export function runningConfig(eng, d) {
   const L = [];
@@ -56,11 +115,11 @@ export function runningConfig(eng, d) {
   const body = [];
   body.push('!', `! Last configuration change at ${String(w.hh).padStart(2, '0')}:${String(w.mm).padStart(2, '0')}:${String(w.ss).padStart(2, '0')} UTC ${w.dow.slice(0, 3)} ${w.mon} ${w.day} ${w.year}`, '!');
   body.push(d.kind === 'router' ? 'version 15.7' : 'version 17.9', 'service timestamps debug datetime msec', 'service timestamps log datetime msec', 'no service password-encryption', '!', `hostname ${d.hostname}`, '!', 'no ip domain lookup', '!');
+  if (d.relayTrustAll) body.push('ip dhcp relay information trust-all', '!');
   if (d.kind === 'switch') {
-    if (d.snoop.enabled) {
-      if (d.snoop.vlans.length) body.push(`ip dhcp snooping vlan ${fmtRangeList(d.snoop.vlans)}`);
-      body.push('ip dhcp snooping');
-    }
+    if (d.snoop.vlans.length) body.push(`ip dhcp snooping vlan ${fmtRangeList(d.snoop.vlans)}`);
+    if (d.snoop.opt82 === false) body.push('no ip dhcp snooping information option');
+    if (d.snoop.enabled) body.push('ip dhcp snooping');
     body.push('vtp mode transparent', '!', `spanning-tree mode ${d.stp.mode}`, 'spanning-tree extend system-id');
     for (const [a, b] of d.stp.disabled || []) body.push(`no spanning-tree vlan ${a === b ? a : `${a}-${b}`}`);
     for (const [v, pr] of Object.entries(d.stp.priority || {})) body.push(`spanning-tree vlan ${v} priority ${pr}`);
@@ -70,55 +129,11 @@ export function runningConfig(eng, d) {
       body.push(`vlan ${v}`, ` name ${name}`, '!');
     }
   }
-  const ifaceBlock = p => {
-    body.push(`interface ${longIf(p.name)}`);
-    if (p.description) body.push(` description ${p.description}`);
-    if (d.kind === 'switch' && p.kind === 'eth') {
-      if (p.mode === 'trunk') {
-        if (p.native !== 1) body.push(` switchport trunk native vlan ${p.native}`);
-        if (p.allowed !== 'all') body.push(` switchport trunk allowed vlan ${p.allowed.length ? fmtRangeList(p.allowed) : 'none'}`);
-        body.push(' switchport mode trunk');
-      } else {
-        if (p.accessVlan !== 1) body.push(` switchport access vlan ${p.accessVlan}`);
-        body.push(' switchport mode access');
-      }
-      if (p.speed !== 'auto') body.push(` speed ${p.speed}`);
-      if (p.duplex !== 'auto') body.push(` duplex ${p.duplex}`);
-      if (!p.adminUp) body.push(' shutdown');
-      if (p.portfast) body.push(p.mode === 'trunk' ? ' spanning-tree portfast trunk' : ' spanning-tree portfast');
-      if (p.bpduguard) body.push(' spanning-tree bpduguard enable');
-      if (p.snoopTrust) body.push(' ip dhcp snooping trust');
-    } else if (d.kind === 'router' && p.kind === 'eth') {
-      if (p.ip) body.push(` ip address ${fmtIp(p.ip.addr)} ${fmtMask(p.ip.len)}`);
-      else body.push(' no ip address');
-      for (const h of p.helpers || []) body.push(` ip helper-address ${fmtIp(h)}`);
-      if (p.aclIn) body.push(` ip access-group ${p.aclIn} in`);
-      if (p.aclOut) body.push(` ip access-group ${p.aclOut} out`);
-      if (p.ip && !p.proxyArp) body.push(' no ip proxy-arp');
-      if (p.nat) body.push(` ip nat ${p.nat}`);
-      if (!p.adminUp) body.push(' shutdown');
-      body.push(` duplex ${p.duplex}`, ` speed ${p.speed}`);
-    }
-    body.push('!');
-  };
   for (const p of Object.values(d.ports)) {
     if (p.kind === 'console') continue;
-    ifaceBlock(p);
+    body.push(...interfaceConfig(d, p.name), '!');
     if (d.kind === 'router') {
-      for (const s of Object.values(d.subifs).filter(x => x.parent === p.name).sort((a, b) => a.vlan - b.vlan)) {
-        body.push(`interface ${longIf(s.name)}`);
-        if (s.description) body.push(` description ${s.description}`);
-        body.push(` encapsulation dot1Q ${s.vlan}${s.native ? ' native' : ''}`);
-        if (s.ip) body.push(` ip address ${fmtIp(s.ip.addr)} ${fmtMask(s.ip.len)}`);
-        for (const h of s.helpers || []) body.push(` ip helper-address ${fmtIp(h)}`);
-        if (s.aclIn) body.push(` ip access-group ${s.aclIn} in`);
-        if (s.aclOut) body.push(` ip access-group ${s.aclOut} out`);
-        if (s.ip && !s.proxyArp) body.push(' no ip proxy-arp');
-        if (s.unreachables === false) body.push(' no ip unreachables');
-        if (s.nat) body.push(` ip nat ${s.nat}`);
-        if (!s.adminUp) body.push(' shutdown');
-        body.push('!');
-      }
+      for (const s of Object.values(d.subifs).filter(x => x.parent === p.name).sort((a, b) => a.vlan - b.vlan)) body.push(...interfaceConfig(d, s.name), '!');
     }
   }
   if (d.kind === 'switch') body.push('interface Vlan1', ' no ip address', ' shutdown', '!');
@@ -324,8 +339,9 @@ export function showSpanningTree(eng, d, vlan) {
       const r = stpRecord(eng, d.id, v, p.name);
       const l = eng.linkAt(d.id, p.name);
       const c = portCost(l ? eng.linkStatus(l.id).speed : 1000);
-      const sts = r.st === 'blocking' && d.stp.mode === 'rapid-pvst' ? 'BLK' : stCode[r.st];
-      L.push(`${pad(p.name, 20)}${pad(roleCode[r.role] || 'Desg', 5)}${pad(sts, 4)}${pad(c, 10)}${pad(`128.${Object.keys(d.ports).indexOf(p.name) + 1}`, 9)}P2p${r.edge ? ' Edge' : ''}`);
+      const sts = (r.st === 'blocking' || r.st === 'listening') && d.stp.mode === 'rapid-pvst' ? 'BLK' : stCode[r.st]; // RSTP has no listening: discarding
+      const type = `${r.p2p === false ? 'Shr' : 'P2p'}${r.edge ? ' Edge' : ''}${d.stp.mode === 'rapid-pvst' && r.peer === 'pvst' ? ' Peer(STP)' : ''}`;
+      L.push(`${pad(p.name, 20)}${pad(roleCode[r.role] || 'Desg', 5)}${pad(sts, 4)}${pad(c, 10)}${pad(`128.${Object.keys(d.ports).indexOf(p.name) + 1}`, 9)}${type}`);
     }
     L.push('');
   }
@@ -432,8 +448,15 @@ function classfulOf(net) {
   return { net: (net & 0xffffff00) >>> 0, len: 24 };
 }
 
-export function showIpRoute(eng, d) {
-  const { table, notInstalled } = eng.routes(d.id);
+/** Static route tail: "[1/0] via 198.51.100.1", "... via 198.51.100.1, Gi0/0" or "is directly connected, Gi0/0". */
+function staticVia(r) {
+  if (r.nh === null || r.nh === undefined) return `is directly connected, ${longIf(r.iface)}`;
+  return `[${r.ad}/0] via ${fmtIp(r.nh)}${r.exitIf ? `, ${longIf(r.iface)}` : ''}`;
+}
+
+export function showIpRoute(eng, d, only = null) {
+  const { table: all, notInstalled } = eng.routes(d.id);
+  const table = only ? all.filter(r => only.includes(r.type)) : all;
   const L = [
     'Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP',
     '       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area',
@@ -445,8 +468,8 @@ export function showIpRoute(eng, d) {
     '       + - replicated route, % - next hop override', '',
   ];
   const def = table.find(r => r.len === 0);
-  L.push(def ? `Gateway of last resort is ${fmtIp(def.nh)} to network 0.0.0.0` : 'Gateway of last resort is not set', '');
-  if (def) L.push(`S*    0.0.0.0/0 [${def.ad}/0] via ${fmtIp(def.nh)}`);
+  L.push(def ? `Gateway of last resort is ${fmtIp(def.nh ?? 0)} to network 0.0.0.0` : 'Gateway of last resort is not set', '');
+  if (def) L.push(`S*    0.0.0.0/0 ${staticVia(def)}`);
   const groups = new Map();
   for (const r of table) {
     if (r.len === 0) continue;
@@ -462,11 +485,70 @@ export function showIpRoute(eng, d) {
     routes.sort((a, b) => a.net - b.net || a.len - b.len);
     for (const r of routes) {
       const pfx = masks.size > 1 ? `${fmtIp(r.net)}/${r.len}` : fmtIp(r.net);
-      if (r.type === 'S') L.push(`S        ${pfx} [${r.ad}/0] via ${fmtIp(r.nh)}`);
+      if (r.type === 'S') L.push(`S        ${pfx} ${staticVia(r)}`);
       else L.push(`${r.type}        ${pfx} is directly connected, ${longIf(r.iface)}`);
     }
   }
   return { lines: L, notInstalled };
+}
+
+/** show ip route <address>: the longest-match entry, trimmed to the lines that matter. */
+export function showIpRouteEntry(eng, d, ip) {
+  const best = lookup(eng.routes(d.id).table, ip);
+  if (!best) return ['% Network not in table'];
+  const pfx = best.len === 0 ? '0.0.0.0/0, supernet' : `${fmtIp(best.net)}/${best.len}`;
+  const via = best.nh !== null && best.nh !== undefined ? `${fmtIp(best.nh)}${best.exitIf ? `, via ${longIf(best.iface)}` : ''}` : `directly connected, via ${longIf(best.iface)}`;
+  const known = best.type === 'S'
+    ? `  Known via "static", distance ${best.ad}, metric 0${best.nh == null ? ' (connected)' : ''}${best.len === 0 ? ', candidate default path' : ''}`
+    : `  Known via "connected", distance 0, metric 0 (connected${best.type === 'C' ? ', via interface' : ''})`;
+  return [`Routing entry for ${pfx}`, known, '  Routing Descriptor Blocks:', `  * ${via}`, '      Route metric is 0, traffic share count is 1'];
+}
+
+/** show ip interface [<if>] (IOS 15 layout, trimmed to the lines a troubleshooter reads). */
+export function showIpInterface(eng, d, name) {
+  const names = name ? [name] : Object.values(d.ports).filter(p => p.kind === 'eth').flatMap(p => [p.name, ...Object.values(d.subifs || {}).filter(x => x.parent === p.name).sort((a, b) => a.vlan - b.vlan).map(x => x.name)]);
+  const L = [];
+  for (const n of names) {
+    const c = d.ports[n] || d.subifs?.[n];
+    if (!c) return ['% Invalid input detected: no such interface'];
+    const st = ifStatus(eng, d, d.ports[c.parent || n]);
+    const admin = c.parent ? !c.adminUp : st.admin; // same rule as "show ip interface brief"
+    L.push(`${longIf(n)} is ${admin ? 'administratively down' : st.up ? 'up' : 'down'}, line protocol is ${!admin && st.up ? 'up' : 'down'}`);
+    if (!c.ip) { L.push('  Internet protocol processing disabled'); continue; }
+    const helpers = c.helpers || [];
+    L.push(`  Internet address is ${fmtIp(c.ip.addr)}/${c.ip.len}`, '  Broadcast address is 255.255.255.255', '  Address determined by non-volatile memory', '  MTU is 1500 bytes');
+    if (!helpers.length) L.push('  Helper address is not set');
+    else L.push(`  Helper address${helpers.length > 1 ? 'es are' : ' is'} ${fmtIp(helpers[0])}`, ...helpers.slice(1).map(h => `${' '.repeat(helpers.length > 1 ? 23 : 20)}${fmtIp(h)}`));
+    L.push('  Directed broadcast forwarding is disabled',
+      `  Outgoing access list is ${c.aclOut || 'not set'}`, `  Inbound  access list is ${c.aclIn || 'not set'}`,
+      `  Proxy ARP is ${c.proxyArp ? 'enabled' : 'disabled'}`, '  Local Proxy ARP is disabled', '  Security level is default', '  Split horizon is enabled',
+      '  ICMP redirects are always sent', `  ICMP unreachables are ${c.unreachables === false ? 'never' : 'always'} sent`, '  ICMP mask replies are never sent',
+      '  IP fast switching is enabled', '  IP CEF switching is enabled',
+      c.nat ? `  Network address translation is enabled, interface in domain ${c.nat}` : '  Network address translation is disabled');
+  }
+  return L;
+}
+
+/** show interfaces <if> switchport (private-VLAN and capture lines trimmed). */
+export function showSwitchport(eng, d, name) {
+  const p = d.ports[name];
+  if (!p || p.kind !== 'eth') return ['% Invalid input detected: no such interface'];
+  const st = ifStatus(eng, d, p);
+  const trunk = p.mode === 'trunk';
+  const vname = v => (v === 1 ? 'default' : knowsVlan(d, v) ? d.vlans[v] : 'Inactive');
+  return [
+    `Name: ${p.name}`, 'Switchport: Enabled',
+    `Administrative Mode: ${trunk ? 'trunk' : 'static access'}`,
+    `Operational Mode: ${!st.up ? 'down' : trunk ? 'trunk' : 'static access'}`,
+    'Administrative Trunking Encapsulation: dot1q',
+    ...(trunk && st.up ? ['Operational Trunking Encapsulation: dot1q'] : []),
+    `Negotiation of Trunking: ${trunk ? 'On' : 'Off'}`,
+    `Access Mode VLAN: ${p.accessVlan} (${vname(p.accessVlan)})`,
+    `Trunking Native Mode VLAN: ${p.native} (${vname(p.native)})`,
+    'Administrative Native VLAN tagging: enabled', 'Voice VLAN: none',
+    `Trunking VLANs Enabled: ${p.allowed === 'all' ? 'ALL' : fmtRangeList(p.allowed) || 'NONE'}`,
+    'Pruning VLANs Enabled: 2-1001', '', 'Protected: false', 'Unknown unicast blocked: disabled', 'Unknown multicast blocked: disabled', 'Appliance trust: none',
+  ];
 }
 
 export function showAccessLists(eng, d, name) {
@@ -492,7 +574,7 @@ export function showNat(eng, d) {
 }
 
 export function showSnooping(eng, d) {
-  const L = [`Switch DHCP snooping is ${d.snoop.enabled ? 'enabled' : 'disabled'}`, 'Switch DHCP gleaning is disabled', 'DHCP snooping is configured on following VLANs:', d.snoop.vlans.length ? fmtRangeList(d.snoop.vlans) : 'none', 'DHCP snooping is operational on following VLANs:', d.snoop.enabled && d.snoop.vlans.length ? fmtRangeList(d.snoop.vlans) : 'none', 'Insertion of option 82 is enabled', '   circuit-id default format: vlan-mod-port', '   remote-id: ' + macCisco(d.mac) + ' (MAC)', 'Option 82 on untrusted port is not allowed', 'Verification of hwaddr field is enabled', 'Verification of giaddr field is enabled', 'DHCP snooping trust/rate is configured on the following Interfaces:', '', `${pad('Interface', 27)}${pad('Trusted', 11)}${pad('Allow option', 16)}Rate limit (pps)`, '-----------------------    -------    ------------    ----------------'];
+  const L = [`Switch DHCP snooping is ${d.snoop.enabled ? 'enabled' : 'disabled'}`, 'Switch DHCP gleaning is disabled', 'DHCP snooping is configured on following VLANs:', d.snoop.vlans.length ? fmtRangeList(d.snoop.vlans) : 'none', 'DHCP snooping is operational on following VLANs:', d.snoop.enabled && d.snoop.vlans.length ? fmtRangeList(d.snoop.vlans) : 'none', `Insertion of option 82 is ${d.snoop.opt82 === false ? 'disabled' : 'enabled'}`, '   circuit-id default format: vlan-mod-port', '   remote-id: ' + macCisco(d.mac) + ' (MAC)', 'Option 82 on untrusted port is not allowed', 'Verification of hwaddr field is enabled', 'Verification of giaddr field is enabled', 'DHCP snooping trust/rate is configured on the following Interfaces:', '', `${pad('Interface', 27)}${pad('Trusted', 11)}${pad('Allow option', 16)}Rate limit (pps)`, '-----------------------    -------    ------------    ----------------'];
   for (const p of Object.values(d.ports)) if (p.snoopTrust) L.push(`${pad(longIf(p.name), 27)}${pad('yes', 11)}${pad('yes', 16)}unlimited`);
   return L;
 }

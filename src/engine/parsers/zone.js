@@ -121,11 +121,21 @@ export function parseZone(text, zone, file = 'db.zone') {
     }
   }
   const ok = errors.length === 0;
-  return { ok, zone: origin0, records: ok ? records : [], serial: soa?.serial ?? null, soa, errors };
+  return { ok, zone: origin0, file, records: ok ? records : [], serial: soa?.serial ?? null, soa, errors };
+}
+
+// isc_result_totext() wording for the master-file loader failures this parser detects.
+const LOAD_RESULT = [[/dotted quad/, 'bad dotted quad'], [/unbalanced/, 'unbalanced parentheses'], [/end of input/, 'unexpected end of input'], [/no TTL/, 'no ttl'], [/bad ttl/, 'bad ttl'], [/unknown RR type/, 'unknown class/type'], [/CNAME and other data/, 'CNAME and other data']];
+
+/** The lines named and named-checkzone log after a failed zone load (zone-level checks have no "loading" line). */
+export function zoneLoadFailure(res, file = res.file) {
+  const e = res.errors[0] || '';
+  const why = (LOAD_RESULT.find(([re]) => re.test(e)) || [null, 'syntax error'])[1];
+  return [...(/^zone /.test(e) ? [] : [`zone ${res.zone}/IN: loading from master file ${file} failed: ${why}`]), `zone ${res.zone}/IN: not loaded due to errors.`];
 }
 
 /** named-checkzone style output. */
 export function checkzoneOutput(res) {
   if (res.ok) return [`zone ${res.zone}/IN: loaded serial ${res.serial}`, 'OK'];
-  return [...res.errors, `zone ${res.zone}/IN: loading from master file failed: ${/dotted quad/.test(res.errors[0]) ? 'bad dotted quad' : 'syntax error'}`, `zone ${res.zone}/IN: not loaded due to errors.`];
+  return [...res.errors, ...zoneLoadFailure(res)];
 }

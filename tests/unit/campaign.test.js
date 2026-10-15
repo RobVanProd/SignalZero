@@ -203,9 +203,11 @@ test('M10: snooping without a trusted uplink starves everyone; shut-port is cont
   let run = cli(eng);
   const ipc = run('GUEST-KIOSK', 'ipconfig /all');
   assert.ok(ipc.lines.some(l => typeof l === 'string' && l.includes('DHCP Server') && l.includes('192.168.8.1')));
-  run('ACCESS-SW', 'enable', 'configure terminal', 'ip dhcp snooping', 'ip dhcp snooping vlan 30', 'end');
+  // Option 82 insertion off, so the IOS relay forwards the request and the untrusted uplink is what fails.
+  run('ACCESS-SW', 'enable', 'configure terminal', 'ip dhcp snooping', 'ip dhcp snooping vlan 30', 'no ip dhcp snooping information option', 'end');
   const r = run('GUEST-KIOSK', 'ipconfig /release', 'ipconfig /renew');
   assert.ok(r.lines.some(l => typeof l === 'string' && l.includes('unable to contact your DHCP server')), 'legit offers dropped on untrusted uplink');
+  assert.ok(r.lines.some(l => typeof l === 'object' && /offer from CORE-SRV did not reach GUEST-KIOSK \(dropped by DHCP snooping\)/.test(l.text)));
   const log = run('ACCESS-SW', 'show logging');
   assert.ok(log.lines.some(l => /DHCP_SNOOPING/.test(l)));
 

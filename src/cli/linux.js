@@ -202,9 +202,10 @@ function digCmd(eng, d, args) {
   const srv = server ?? (a.dns || [])[0];
   const r = resolveName(eng, d, name, { server: srv, type });
   const w = wallClock(eng.s.t);
-  if (r.error === 'timeout') {
-    eng.event({ type: 'dns', host: d.id, name, ok: false, error: 'timeout' });
-    return [`;; communications error to ${fmtIp(srv)}#53: timed out`, `;; communications error to ${fmtIp(srv)}#53: timed out`, `;; communications error to ${fmtIp(srv)}#53: timed out`, '', `; <<>> DiG 9.18.28-0ubuntu0.24.04.1-Ubuntu <<>> ${args.join(' ')}`, ';; global options: +cmd', ';; no servers could be reached'];
+  if (r.error === 'timeout' || r.error === 'refused') {
+    eng.event({ type: 'dns', host: d.id, name, ok: false, error: r.error });
+    const why = `;; communications error to ${fmtIp(srv)}#53: ${r.error === 'refused' ? 'connection refused' : 'timed out'}`;
+    return [why, why, why, '', `; <<>> DiG 9.18.28-0ubuntu0.24.04.1-Ubuntu <<>> ${args.join(' ')}`, ';; global options: +cmd', ';; no servers could be reached'];
   }
   eng.event({ type: 'dns', host: d.id, name, server: srv, ok: !!r.ok, addr: r.addr, rcode: r.rcode, aa: r.aa });
   const answers = r.answers || [];
@@ -332,7 +333,7 @@ function systemctl(eng, sess, d, args) {
     }
     case 'reload': {
       if (!svc.active) { L.push(`${unit}.service is not active, cannot reload.`); break; }
-      if (u.svc === 'named') { namedLoad(eng, d); eng.journal(d, 'named', 'reloading configuration succeeded'); eng.mutated(`${d.hostname}: systemctl reload named`); }
+      if (u.svc === 'named') { eng.journal(d, 'named', 'reloading configuration succeeded'); namedLoad(eng, d, { reload: true }); eng.journal(d, 'named', 'reloading zones succeeded'); eng.mutated(`${d.hostname}: systemctl reload named`); }
       else if (u.svc === 'isc-dhcp-server') L.push('Failed to reload isc-dhcp-server.service: Job type reload is not applicable for unit isc-dhcp-server.service.');
       break;
     }
@@ -417,7 +418,11 @@ export function linuxExecute(eng, sess, raw) {
       if (!name) return out(['> ', { t: 'note', text: 'trainer: interactive mode not supported; use nslookup <name> [server].' }]);
       const srv = args[1] ? parseIp(args[1]) : (hostAddr(eng, d).dns || [])[0];
       const r = resolveName(eng, d, name, { server: srv });
-      if (r.error === 'timeout') return out([`;; communications error to ${fmtIp(srv)}#53: timed out`, ';; communications error to ' + fmtIp(srv) + '#53: timed out', ';; no servers could be reached', '']);
+      if (r.error === 'timeout' || r.error === 'refused') {
+        eng.event({ type: 'dns', host: d.id, name, ok: false, error: r.error });
+        const why = `;; communications error to ${fmtIp(srv)}#53: ${r.error === 'refused' ? 'connection refused' : 'timed out'}`;
+        return out([why, why, ';; no servers could be reached', '']);
+      }
       const L = [`Server:\t\t${fmtIp(srv)}`, `Address:\t${fmtIp(srv)}#53`, ''];
       if (r.ok) { if (!r.aa) L.push('Non-authoritative answer:'); L.push(`Name:\t${r.qname}`, `Address: ${fmtIp(r.addr)}`, ''); }
       else L.push(`** server can't find ${r.qname || name}: ${r.rcode || 'SERVFAIL'}`, '');
@@ -460,7 +465,7 @@ export function linuxExecute(eng, sess, raw) {
       const path = resolvePath(sess, file);
       const t = fileText(eng, d, path);
       if (t === undefined) return out([`zone ${zone}/IN: loading from master file ${file} failed: file not found`, `zone ${zone}/IN: not loaded due to errors.`]);
-      const r = parseZone(t, zone, path.split('/').pop());
+      const r = parseZone(t, zone, file);
       eng.event({ type: 'configtest', host: d.id, what: 'zone', ok: r.ok });
       return out(checkzoneOutput(r));
     }
@@ -470,10 +475,19 @@ export function linuxExecute(eng, sess, raw) {
       const svc = d.services?.named;
       if (!svc?.active) return out(['rndc: connect failed: 127.0.0.1#953: connection refused']);
       if (args[0] === 'status') return out(['version: BIND 9.18.28-0ubuntu0.24.04.1-Ubuntu (Extended Support Version) <id:>', `number of zones: ${Object.keys(svc.loaded || {}).length + 100} (99 automatic)`, 'server is up and running']);
-      const res = namedLoad(eng, d);
+      // rndc only reports that named accepted the reload; zone load errors go to named's log, and a zone that
+      // fails keeps serving its previous copy.
+      const zone = args[1]?.replace(/\.$/, '').toLowerCase();
+      if (zone && !svc.zones.some(z => z.zone === zone)) return out(["rndc: 'reload' failed: not found", `no matching zone '${args[1]}' in any view`]);
+      eng.journal(d, 'named', "received control channel command 'reload" + (zone ? ` ${zone}` : '') + "'");
+      if (!zone) eng.journal(d, 'named', 'reloading configuration succeeded');
+      const res = namedLoad(eng, d, { reload: true });
+      if (!zone) eng.journal(d, 'named', 'reloading zones succeeded');
       eng.mutated(`${d.hostname}: rndc reload`);
       eng.event({ type: 'rndc', host: d.id, ok: res.ok });
-      return out(res.ok ? ['server reload successful'] : ['rndc: \'reload\' failed: failure']);
+      const L = [zone ? 'zone reload queued' : 'server reload successful'];
+      if (!res.ok) L.push({ t: 'note', text: 'trainer: rndc only confirms that named accepted the command. A zone that fails to load is only logged ("journalctl -u named"): named keeps serving the copy it loaded before, or answers SERVFAIL if it never loaded one.' });
+      return out(L);
     }
     case 'dhcp-lease-list': {
       const svc = d.services?.['isc-dhcp-server'];

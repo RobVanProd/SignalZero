@@ -108,6 +108,7 @@ function ping(eng, d, args) {
   if (!res.ok) {
     L.push(`Ping request could not find host ${target}. Please check the name and try again.`);
     if (res.error === 'timeout') L.push({ t: 'note', text: `trainer: the DNS server(s) ${(res.tried || []).map(x => fmtIp(x.ip)).join(', ') || '(none configured)'} did not answer.` });
+    if (res.error === 'refused') L.push({ t: 'note', text: refusedNote(res) });
     eng.event({ type: 'ping', host: d.id, target, ok: false, resolved: false });
     return { lines: L };
   }
@@ -214,6 +215,10 @@ function pathping(eng, d, args) {
   return { lines: L };
 }
 
+function refusedNote(r) {
+  return `trainer: ${(r.tried || []).map(x => fmtIp(x.ip)).join(', ')} answered with ICMP port unreachable: the server is up but nothing listens on UDP 53 (service down, not path down).`;
+}
+
 function nslookup(eng, d, args) {
   const name = args[0];
   const serverArg = args[1] ? parseIp(args[1]) : undefined;
@@ -229,6 +234,11 @@ function nslookup(eng, d, args) {
     return { lines: L };
   }
   L.push('Server:  UnKnown', `Address:  ${fmtIp(srv)}`, '');
+  if (r.error === 'refused') {
+    L.push(`*** UnKnown can't find ${name}: No response from server`, { t: 'note', text: refusedNote(r) });
+    eng.event({ type: 'dns', host: d.id, name, ok: false, error: 'refused' });
+    return { lines: L };
+  }
   if (r.ok) {
     if (!r.aa) L.push('Non-authoritative answer:');
     const cn = (r.answers || []).filter(x => x.type === 'CNAME');

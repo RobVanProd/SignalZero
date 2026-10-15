@@ -22,7 +22,7 @@ A level is evidence of practice inside this simulator. It is not an exam-readine
 | M03 | The Wrong Destination | Stale A record to a live decommissioned server + client cache | Compare DNS vs documentation, edit zone, `rndc reload`, flush cache, verify with curl (ping alone fails the check) | 3.4, 5.3, 5.5, 1.4, 3.1 |
 | M04 | The Last Hop | Default route next hop outside the connected /30 (configured, not installed) | tracert, routing table vs running-config, fix route, verify HTTPS | 2.1, 5.3, 5.5, 1.7 |
 | M05 | Uninvited Guest | Guest AP in the clinic VLAN | Move VLAN, renew (NAK), inbound ACL that still permits DNS and internet, test both directions from the guest | 2.2, 4.1, 4.3, 1.4, 5.3 |
-| M06 | Broadcast Storm | Two risers with STP disabled | Read MAC-flap logs/CPU, restore loop prevention or remove the path; aftershock measures outage of the chosen method | 2.2, 5.3, 3.2, 1.6, 5.1 |
+| M06 | Broadcast Storm | Two risers with STP disabled | Read MAC-flap logs/CPU, restore loop prevention or remove the path; aftershock measures outage of the chosen method (rapid failover needs Rapid PVST+ on both switches; PortFast trunk toward the router) | 2.2, 5.3, 3.2, 1.6, 5.1 |
 | M07 | A Different Floor | Staff VLAN gateway lacks `ip helper-address` | Broadcast domains vs relay, giaddr scope selection | 3.4, 2.1, 5.3, 1.4 |
 | M08 | Fifty Cameras | /27 scope exhausted; overlap trap with door-controller /27 | Size a non-overlapping /26+, change gateway and scope together, force renewals | 1.7, 3.4, 3.1, 5.3 |
 | M09 | The 1% Problem | One end hard-coded 100/full → partner half duplex | pathping, interface counters on both ends, CDP log, fix both ends, test call MOS ≥ 4.0 | 5.4, 5.2, 2.2, 3.2, 5.5 |

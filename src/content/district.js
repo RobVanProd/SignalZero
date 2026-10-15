@@ -121,7 +121,7 @@ export function buildDistrict(params = DEFAULT_PARAMS) {
   const rtr = add(device('EDGE-RTR', 'router', 'ios', { model: 'ISR4331', map: { x: 260, y: 90 }, role: 'Gateway / inter-VLAN routing / NAT' }));
   addPort(rtr, 'Gi0/0', { ip: { addr: ip(p.wan.local), len: p.wan.len }, nat: 'outside', description: 'WAN to ISP (circuit DC-44817)' });
   addPort(rtr, 'Gi0/1', { description: 'TRUNK to ACCESS-SW Gi0/1' });
-  addPort(rtr, 'Gi0/2', { adminUp: false });
+  addPort(rtr, 'Gi0/2', { adminUp: false, proxyArp: true }); // unconfigured spare: IOS defaults (proxy ARP on)
   addPort(rtr, 'Con0', { kind: 'console' });
   const sub = (role, host, len, extra = {}) => {
     const vlan = v[role];
