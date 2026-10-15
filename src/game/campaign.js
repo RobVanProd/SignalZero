@@ -53,6 +53,8 @@ export class Campaign {
     const eng = this.eng;
     const m = this.mission;
     const phase = this.st.phase;
+    // A won mission stays won until next(); re-evaluating must not record a second result.
+    if (phase === 'complete') return { status: 'complete', goals: [], constraints: [], evidence: [] };
     if (phase === 'armed') return { status: 'armed', goals: [], constraints: [], evidence: [] };
     const goals = this.goalsFor().map(g => ({ label: g.label, ok: !!g.check(eng) }));
     const constraints = phase === 'main' ? (m.constraints || []).map(c => ({ label: c.label, ok: !!c.check(eng) })) : [];

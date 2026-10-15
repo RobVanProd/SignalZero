@@ -119,9 +119,13 @@ export class World {
 
   lights() {
     const s = this.scene;
-    s.add(new THREE.HemisphereLight(0x7fb0d0, 0x101820, 0.9));
-    // wall washers: soft gradients so walls read as surfaces, not voids
-    for (const [x, y, z, tx, tz, col] of [[-10.5, 0.2, 3, -12, 3, 0x2a9fd0], [-10.5, 0.2, -8, -12, -8, 0x2a9fd0], [-4, 0.2, 8.2, -4, 9, 0x6fc7ff], [8, 0.2, 8.2, 8, 9, 0xffb07a], [11.2, 0.2, 6.5, 12, 6.5, 0xffb07a], [24, 0.2, -10.2, 24, -11, 0x39d0c0], [28.2, 0.2, -2, 29, -2, 0x39d0c0], [15.5, 0.2, -6.5, 15.5, -7.4, 0x39d0c0]]) {
+    const tier0 = this.q.name;
+    s.add(new THREE.HemisphereLight(0x7fb0d0, 0x101820, tier0 === 'low' ? 1.3 : 0.9));
+    // wall washers: soft gradients so walls read as surfaces, not voids (each light costs per-pixel work,
+    // so lower tiers get fewer)
+    const tier = tier0;
+    const washers = tier === 'high' ? 8 : tier === 'medium' ? 4 : 0;
+    for (const [x, y, z, tx, tz, col] of [[-10.5, 0.2, 3, -12, 3, 0x2a9fd0], [-10.5, 0.2, -8, -12, -8, 0x2a9fd0], [-4, 0.2, 8.2, -4, 9, 0x6fc7ff], [8, 0.2, 8.2, 8, 9, 0xffb07a], [11.2, 0.2, 6.5, 12, 6.5, 0xffb07a], [24, 0.2, -10.2, 24, -11, 0x39d0c0], [28.2, 0.2, -2, 29, -2, 0x39d0c0], [15.5, 0.2, -6.5, 15.5, -7.4, 0x39d0c0]].slice(0, washers)) {
       const w = new THREE.SpotLight(col, 14, 6, 0.9, 1, 1.5);
       w.position.set(x, y, z);
       w.target.position.set(tx, 2.6, tz);
@@ -138,7 +142,8 @@ export class World {
       moon.shadow.normalBias = 0.02;
     }
     s.add(moon, moon.target);
-    for (const [x, z] of [[-5.4, -5], [0, -5.6], [5.4, -4.8], [-5.4, 1.8], [5.4, 1.8], [0, 6.2], [-5.4, 6.4]]) {
+    const ceilingPts = [[-5.4, -5], [0, -5.6], [5.4, -4.8], [-5.4, 1.8], [5.4, 1.8], [0, 6.2], [-5.4, 6.4]];
+    for (const [x, z] of tier === 'low' ? ceilingPts.filter((_, i) => i % 2 === 0) : ceilingPts) {
       const p = new THREE.PointLight(0xd8f0ff, 5, 9.5, 1.7);
       p.position.set(x, ROOM.h - 0.25, z);
       s.add(p);
@@ -156,7 +161,7 @@ export class World {
     wallGlow.position.set(10.6, 2.4, 0);
     s.add(wallGlow);
     for (const [x, z] of [[6.5, 6.8], [10, 6.8]]) { const p = new THREE.PointLight(0xffd7a8, 10, 8, 1.5); p.position.set(x, ROOM.h - 0.3, z); s.add(p); }
-    for (const [x, z] of [[21, -9], [25, -9], [21, -3], [26, -3], [15.5, -6.5]]) { const p = new THREE.PointLight(0xd8f0ff, 10, 9, 1.5); p.position.set(x, SECTOR_B.h - 0.25, z); s.add(p); }
+    for (const [x, z] of (tier === 'low' ? [[23, -6], [15.5, -6.5]] : [[21, -9], [25, -9], [21, -3], [26, -3], [15.5, -6.5]])) { const p = new THREE.PointLight(0xd8f0ff, tier === 'low' ? 16 : 10, tier === 'low' ? 12 : 9, 1.5); p.position.set(x, SECTOR_B.h - 0.25, z); s.add(p); }
     this.alarms = [];
     for (const [x, z] of [[-11.4, 8.4], [11.4, -8.4]]) {
       const a = new THREE.SpotLight(0xff2a3a, 0, 18, 0.35, 0.5, 1.2);

@@ -52,6 +52,12 @@ test('full campaign: each mission starts broken, needs verification, and is won 
       }
     }
     assert.equal(r.status, 'won', `${m.id} should be won (got ${r.status}: ${JSON.stringify(r.goals)} ${JSON.stringify(r.evidence)})`);
+    // Regression: the game loop keeps evaluating after a win; that must not record (or debrief) it again.
+    const recorded = camp.st.results.length;
+    eng.advance(2);
+    assert.equal(camp.tick(), null, `${m.id}: tick after a win must be inert`);
+    assert.notEqual(camp.evaluate('tick').status, 'won', `${m.id}: re-evaluation after a win must not win again`);
+    assert.equal(camp.st.results.length, recorded, `${m.id}: a win is recorded once`);
     if (i + 1 < MISSIONS.length) camp.next();
   }
   assert.equal(camp.st.results.length, MISSIONS.length);
