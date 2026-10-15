@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#030b13">
+<meta name="description" content="SIGNAL//ZERO: a three-dimensional networking repair game. Walk the NOC, diagnose real network faults, restore city services.">
+<title>SIGNAL//ZERO — The Last Mile · 3D Network Engineer</title>
+<style>
+:root{--bg:#030b13;--panel:#091825;--panel2:#102637;--line:#224355;--line2:#37617b;--ink:#eafaff;--muted:#80a8ba;--cyan:#6beedc;--green:#6cffbd;--orange:#ffc17a;--danger:#ff6d80;--font:Inter,"Segoe UI",Arial,sans-serif;--mono:"Cascadia Code",Consolas,"Liberation Mono",monospace}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#030b13;color:var(--ink);font-family:var(--font);font-size:14px}button,input{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}#view{position:fixed;inset:0}#view canvas{display:block;width:100%;height:100%;touch-action:none}#grain{pointer-events:none;position:fixed;inset:0;z-index:1;opacity:.22;background:repeating-linear-gradient(180deg,#ffffff05 0 1px,#0000 1px 4px);mix-blend-mode:screen}#vignette{pointer-events:none;position:fixed;inset:0;z-index:1;background:radial-gradient(ellipse at 50% 42%,transparent 35%,#01050d88 100%)}
+#hud{position:fixed;z-index:3;inset:0;pointer-events:none}#hud *{pointer-events:auto}.top{position:absolute;top:16px;left:22px;right:22px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}.logo{font-size:19px;letter-spacing:.28em;font-weight:950;text-shadow:0 2px 20px #0009}.logo em{color:var(--cyan);font-style:normal}.micro{font:700 10px var(--mono);letter-spacing:.20em;text-transform:uppercase;color:#8eb8c9}.top-left{display:flex;flex-direction:column;gap:8px}.mission-card{background:#071520cc;border:1px solid #46708c6e;border-left:3px solid var(--cyan);box-shadow:0 12px 50px #0008;backdrop-filter:blur(14px);max-width:min(410px,52vw);padding:14px 16px 15px}.mission-number{font:800 10px var(--mono);color:var(--cyan);letter-spacing:.17em}.mission-title{font-weight:900;font-size:19px;letter-spacing:.03em;margin:6px 0}.mission-sub{line-height:1.48;color:#b5d3de;font-size:12px}.topright{display:flex;align-items:stretch;gap:8px}.stat{background:#091825b8;border:1px solid #3552698c;padding:12px 14px;text-align:right;backdrop-filter:blur(12px);min-width:95px}.stat-value{font:900 17px var(--mono);color:var(--cyan)}.stat-label{font:700 9px var(--mono);color:#7fa5b7;letter-spacing:.14em;margin-top:4px}.icon-btn{display:grid;place-items:center;background:#081925d9;border:1px solid #496d80b0;color:#cfeef1;font:800 16px var(--mono);width:40px;height:40px;border-radius:2px}.icon-btn:hover{background:#214254}
+#reticle{position:fixed;z-index:2;left:50%;top:50%;width:17px;height:17px;border:1px solid #b3f9eb;box-shadow:0 0 12px #52d5db;opacity:.75;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}#reticle:after{content:'';position:absolute;left:6px;top:6px;width:3px;height:3px;background:#fff;border-radius:50%}#interaction{position:fixed;z-index:3;bottom:96px;left:50%;transform:translateX(-50%);min-width:270px;text-align:center;background:#061724e0;border:1px solid #4b839a;border-radius:4px;box-shadow:0 8px 30px #000a;padding:12px 18px;pointer-events:none;opacity:0;transition:opacity .15s}#interaction.active{opacity:1}#radio-message{position:fixed;z-index:3;pointer-events:none;left:23px;bottom:98px;width:min(375px,33vw);padding:12px 14px;background:#061e2ae9;border-left:3px solid var(--cyan);box-shadow:0 15px 50px #000a;transition:opacity .3s;opacity:0}#radio-message.active{opacity:1}#radio-speaker{font:800 10px var(--mono);letter-spacing:.17em;color:var(--cyan)}#radio-content{margin-top:6px;color:#d6ebf3;line-height:1.5;font-size:12px}#interaction strong{display:block;margin-bottom:5px;letter-spacing:.08em}#interaction small{font:600 10px var(--mono);color:#90bfcd}kbd{font:800 11px var(--mono);padding:3px 7px;margin-right:3px;background:#254453;color:var(--cyan);border:1px solid #568094;border-radius:3px}#controls-note{position:absolute;bottom:17px;left:21px;padding:10px 12px;background:#071a27b8;border:1px solid #1d4358;color:#96bece;font:700 10px var(--mono);letter-spacing:.03em}#ticker{position:absolute;right:22px;bottom:22px;width:min(360px,38vw);background:#061522cc;border:1px solid #28546c;color:#a3cedb;padding:13px 15px;line-height:1.55;font:12px var(--mono);box-shadow:0 12px 50px #0008}.ticker-title{font-size:10px;color:var(--cyan);font-weight:800;letter-spacing:.12em;margin-bottom:6px}.ticker-line{border-top:1px solid #24506955;padding:4px 0}.status-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}.pill{display:inline-flex;gap:5px;align-items:center;background:#103043;border:1px solid #2f5160;font:800 9px var(--mono);letter-spacing:.05em;padding:5px 7px}.pill.up{color:var(--green)}.pill.down{color:#ff97a1}
+#progress-toast{position:fixed;z-index:17;left:50%;top:23%;width:min(530px,90vw);transform:translate(-50%,-15px);opacity:0;pointer-events:none;text-align:center;padding:25px 27px;background:#0a1f2aee;border:1px solid #57f5dc99;box-shadow:0 0 90px #39e8c133,0 20px 75px #000b;transition:opacity .3s,transform .3s}#progress-toast.active{opacity:1;transform:translate(-50%,0)}.toast-kicker{font:800 11px var(--mono);letter-spacing:.24em;color:#6cf9db}.toast-title{font-size:30px;font-weight:950;margin:8px 0 5px;letter-spacing:.04em}.toast-sub{color:#b3cdd8;line-height:1.5}
+#screenShade{position:fixed;inset:0;z-index:7;background:#02070dde;backdrop-filter:blur(8px)}.hidden{display:none!important}#start{position:fixed;z-index:15;inset:0;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:18px;background:radial-gradient(circle at 50% 27%,#214f5d66,transparent 45%),linear-gradient(115deg,#030914eb,#01050cf5)}#start .hero{position:relative;max-width:820px;width:100%;padding:46px 52px;background:linear-gradient(135deg,#0b1d2cf5,#07101af0);border:1px solid #477589cc;box-shadow:0 25px 130px #000c}#start .hero:before{content:'';position:absolute;left:-1px;top:-1px;width:100px;height:4px;background:var(--cyan);box-shadow:0 0 30px var(--cyan)}.hero-tag{font:800 11px var(--mono);letter-spacing:.25em;color:var(--cyan)}.hero h1{font-size:clamp(36px,6vw,75px);line-height:1;margin:20px 0 0;letter-spacing:.12em;font-weight:1000}.hero h1 span{color:#65f1d4}.hero h2{font-weight:500;letter-spacing:.24em;font-size:15px;color:#a5cbd7;margin:14px 0 20px}.hero p{color:#b3cbd5;max-width:610px;line-height:1.7;font-size:15px;margin:12px 0}.hero-actions{display:flex;flex-wrap:wrap;gap:11px;margin-top:25px}.primary{background:var(--cyan);border:1px solid #d6fff3;color:#03232a;padding:14px 20px;font:950 12px var(--mono);letter-spacing:.12em;box-shadow:0 0 28px #51ffd030}.primary:hover{background:#b5ffed}.secondary{background:#0c2d3d;color:#e3fbff;border:1px solid #476e80;padding:14px 18px;font:850 12px var(--mono);letter-spacing:.08em}.secondary:hover{background:#23516a}.hero-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-top:28px}.hero-step{border-top:1px solid #42728466;padding-top:13px;color:#b5cad4;font-size:12px;line-height:1.55}.hero-step b{display:block;margin-bottom:5px;color:#d8f7fd;letter-spacing:.1em}.hero-bottom{font:11px var(--mono);color:#749cae;margin-top:25px;line-height:1.5}
+#desktop{position:fixed;z-index:12;inset:4vh 4vw 4vh;display:flex;flex-direction:column;background:#09131df4;border:1px solid #739ab0;box-shadow:0 20px 110px #000,0 0 0 6px #050b1288;overflow:hidden}.windowbar{height:54px;display:flex;align-items:center;gap:11px;padding:0 17px;background:linear-gradient(90deg,#163648,#0b2232);border-bottom:1px solid #496a7e;flex-shrink:0}.windowicon{background:var(--cyan);color:#042a2a;font:900 12px var(--mono);padding:8px;letter-spacing:.08em}.window-info{flex:1;min-width:0}.window-info strong{display:block;letter-spacing:.12em;font:900 12px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.window-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#90b6c8;font:10px var(--mono)}.close{background:#1b3140;color:#e6fcff;border:1px solid #5d7a8c;font:900 17px var(--mono);width:36px;height:32px}.close:hover{background:#8f243c}.tabstrip{display:flex;flex-wrap:wrap;gap:6px;padding:10px 15px;background:#0c2130;border-bottom:1px solid #20445a}.tab{background:#0a1a25;border:1px solid #2b5163;color:#94b7c7;padding:9px 13px;font:850 10px var(--mono);letter-spacing:.09em}.tab.active{background:#1e4e5b;border-color:#63d7c0;color:#d2fff5}.desktopBody{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 280px}.mainArea{min-width:0;min-height:0;position:relative;overflow:hidden}#terminal-pane,#topology-pane,#manual-pane{height:100%;display:flex;flex-direction:column}.terminal-head{padding:10px 15px;border-bottom:1px solid #255061;background:#071824;color:#8bd8d4;font:10px var(--mono);letter-spacing:.1em}.terminalout{flex:1;overflow:auto;background:radial-gradient(ellipse at top left,#102a2c50,transparent 60%),#040b11;color:#baf3d0;padding:19px 20px 30px;font:13px/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;scrollbar-color:#315465 #05141c}.command-line{display:flex;align-items:center;gap:7px;padding:12px 14px;background:#0d202b;border-top:1px solid #31546b}.prompt{font:800 12px var(--mono);color:var(--cyan)}#cmd{flex:1;min-width:0;background:#06141e;border:1px solid #3b5f70;color:#e5fff9;padding:11px 13px;outline:0;font:13px var(--mono);border-radius:0}#cmd:focus{border-color:var(--cyan)}#exec{height:41px;padding:0 20px;background:#275761;color:#dffaf7;border:1px solid #70b5b9;font:800 11px var(--mono)}#exec:hover{background:#337479}.sidebar{border-left:1px solid #27465b;padding:16px;background:#0d202e;overflow:auto;min-height:0}.sidebar h4{font:850 10px var(--mono);color:var(--cyan);letter-spacing:.13em;margin:0 0 8px}.sidebar p{color:#a6c4d0;line-height:1.55;font-size:12px;margin:0 0 16px}.device-meta{font:11px var(--mono);padding:12px;background:#081825;border:1px solid #23495a;line-height:1.8;color:#a4d2df;margin-bottom:15px}.quickcmd{display:block;width:100%;margin:5px 0;background:#102a3c;border:1px solid #295569;text-align:left;padding:10px 12px;color:#c8e3e9;font:11px var(--mono)}.quickcmd:hover{background:#194056;color:var(--cyan)}.tiny{color:#7d9fb0;font-size:11px;line-height:1.5}.statuslist{display:grid;gap:6px;margin:12px 0 20px}.statusline{display:flex;justify-content:space-between;border-bottom:1px solid #1e4355;padding:7px 0;font:11px var(--mono)}.statusline b{color:#d8f4f9}.statusline.ok b{color:#75f4bc}.statusline.fail b{color:#ff8b9b}
+.topo-intro,.manual-intro{padding:20px 22px 5px;color:#bedce5;line-height:1.5}.topo-intro h3,.manual-intro h3{margin:0 0 7px;letter-spacing:.08em}.map{flex:1;min-height:0;display:grid;place-items:center;padding:12px 20px;overflow:auto}.map svg{width:100%;height:100%;max-height:410px;min-height:215px;max-width:820px}.map .node{fill:#102b3b;stroke:#4a8298;stroke-width:1.6}.map .nodeLabel{font:800 12px var(--mono);fill:#e6faff;text-anchor:middle}.map .nodeSub{font:9px var(--mono);fill:#92bbc9;text-anchor:middle}.map .cable{stroke:#6bdbc7;stroke-width:4;stroke-linecap:round}.map .cable.down{stroke:#d86e81;stroke-dasharray:8 8}.map .wire{stroke:#4e7182;stroke-width:3}.map .wire.success{stroke:#72ffbc}.map .wire.danger{stroke:#ff8493;stroke-dasharray:7 5}.map circle.pulse{fill:#e3fff6;filter:drop-shadow(0 0 8px #70ffe2)}.manual-copy{padding:14px 25px 26px;max-width:700px;overflow:auto;color:#b7d3df;line-height:1.65}.manual-copy h4{color:var(--cyan);font:850 11px var(--mono);letter-spacing:.1em}.manual-copy p{margin:9px 0 15px}.manual-copy code{color:#9effd9;background:#091f2a;padding:2px 5px}.manual-copy ul{padding-left:18px}.hint-block{padding:10px 12px;border-left:2px solid #e9b97b;background:#271e1b9a;color:#f4d7b6;margin:12px 0}.muted{color:#8aacbc}#desktopFooter{background:#102938;border-top:1px solid #31546a;padding:7px 17px;color:#89b0c0;font:10px var(--mono);display:flex;justify-content:space-between;gap:10px}
+#patch,#guide,#map-overlay{position:fixed;z-index:13;inset:5vh 5vw;display:flex;justify-content:center;align-items:center;background:#02080bca;backdrop-filter:blur(5px)}.patch-card,.guide-card,.map-card{max-width:850px;width:100%;background:#0b1c29;border:1px solid #63899a;box-shadow:0 20px 110px #000;padding:27px 30px;max-height:91vh;overflow:auto}.modal-bar{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:18px}.modal-bar h2{margin:0;font-weight:950;letter-spacing:.10em}.patch-intro{font-size:13px;color:#a7c7d4;line-height:1.6;margin-bottom:20px}.patch-bays{display:grid;grid-template-columns:1fr 1fr;gap:16px}.patch-bay{background:#08131e;border:1px solid #2d5267;padding:19px}.patch-bay h3{font:800 11px var(--mono);letter-spacing:.15em;color:var(--cyan);margin:0 0 15px}.port{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px;margin:9px 0;background:#102637;border:1px solid #2f5469;color:#e5faff;font:700 12px var(--mono)}.port .socket{width:33px;height:25px;border:4px solid #688a91;background:#020910;position:relative;flex-shrink:0}.port .socket:after{content:'';display:block;position:absolute;bottom:0;left:4px;right:4px;height:4px;background:#e2bb74}.port.selected{border-color:#66ffd6;background:#1a4547;box-shadow:0 0 20px #6bffe320}.port.connected .socket{border-color:var(--green);background:#2d895e}.patch-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:17px}.patch-out{flex:1;min-width:150px;color:#9dd0c0;font:11px/1.5 var(--mono)}.guide-copy{line-height:1.6;color:#b2d3df}.guide-copy h4{margin:18px 0 5px;color:var(--cyan);font:800 11px var(--mono)}.guide-copy code{background:#112f3e;color:#9affda;padding:2px 5px}.checkpoints{display:grid;gap:8px;margin:18px 0}.checkpoint{padding:10px 12px;border-left:2px solid #477183;background:#0f2a3a;font:12px var(--mono);color:#a4c4d0}.checkpoint.done{border-left-color:#6ef5c9;color:#a9ffdc}.map-card{max-width:1000px}.map-card #big-map{height:min(60vh,480px)}
+#mobile-controls{display:none;position:fixed;z-index:4;inset:auto 0 0;pointer-events:none;padding:0 18px calc(18px + env(safe-area-inset-bottom));align-items:flex-end;justify-content:space-between}.stick{pointer-events:auto;width:130px;height:130px;border-radius:50%;background:#1533457e;border:1px solid #83abbd70;position:relative;touch-action:none}.stick .knob{position:absolute;width:51px;height:51px;border:1px solid #9ff1e1;box-shadow:0 0 16px #77e2d663;background:#39778d9c;border-radius:50%;left:39px;top:39px;pointer-events:none}.touch-actions{display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:auto}.touch-button{width:77px;height:77px;border:1px solid #88d9cb;border-radius:50%;background:#15444ba8;color:#c3fff0;font:900 13px var(--mono)}.touch-mini{width:66px;height:45px;border:1px solid #577b8d;background:#0d2534d9;color:#d2ebf4;font:800 11px var(--mono)}
+#load-error{position:fixed;z-index:19;inset:20px;display:grid;place-items:center;background:#060f17ec}#load-error .error-card{max-width:600px;padding:30px;border:1px solid #b5697f;background:#15202b}#load-error pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#ffb8b8}
+@media (max-width:930px){.desktopBody{grid-template-columns:minmax(0,1fr) 215px}.sidebar{padding:11px}.topright .stat{min-width:74px;padding:8px}.mission-card{max-width:360px}.mission-title{font-size:16px}}
+@media (pointer:coarse){#mobile-controls{display:flex}#reticle{width:24px;height:24px;opacity:.65}#interaction{bottom:168px}#controls-note{display:none}#ticker{display:none}#radio-message{left:12px;bottom:180px;width:calc(100vw - 108px);max-width:340px}}
+@media (max-width:690px){.top{left:10px;top:10px;right:10px}.logo{font-size:14px}.mission-card{max-width:calc(100vw - 112px);padding:10px}.mission-title{font-size:14px;margin:3px 0}.mission-sub{font-size:10px;line-height:1.35}.topright .stat{display:none}.topright .icon-btn{width:34px;height:34px}.hero{margin:0}.hero h1{font-size:36px}.hero-steps{grid-template-columns:1fr}.hero-step{padding-top:7px}.hero-steps{gap:7px;margin-top:16px}#start .hero{padding:26px 21px}.hero p{font-size:13px;line-height:1.55}.hero-bottom{font-size:10px}#desktop{inset:0;border:0;box-shadow:none}.windowbar{height:48px;padding:0 10px}.tabstrip{padding:7px}.tab{padding:8px 9px}.desktopBody{grid-template-columns:1fr}.sidebar{display:none}.terminalout{font-size:12px;padding:13px}.command-line{padding:8px}.prompt{font-size:10px}.terminalout{padding-bottom:20px}#cmd{font-size:12px}#exec{padding:0 10px}.topo-intro{padding:10px 14px}.map{padding:5px}.map svg{min-height:190px}.manual-copy{padding:10px 14px}.patch-card,.guide-card,.map-card{padding:17px 15px}.patch-bays{gap:8px}.patch-bay{padding:9px}.port{font-size:10px;padding:9px;gap:7px}.patch-out{width:100%}.modal-bar h2{font-size:19px}#patch,#guide,#map-overlay{inset:0}.toast-title{font-size:22px}#interaction{min-width:210px;width:60vw}#desktopFooter{font-size:9px}}
+</style>
+</head>
+<body>
+<div id="view" aria-label="3D network operations center"></div><div id="grain"></div><div id="vignette"></div><div id="reticle"></div>
+<div id="hud">
+ <div class="top"><div class="top-left"><div class="logo">SIGNAL<em>//</em>ZERO <span class="micro">/ THE LAST MILE</span></div><div class="mission-card"><div id="mission-code" class="mission-number">01 / 05 — SIGNAL LOST</div><div id="mission-title" class="mission-title">THE BROKEN LINK</div><div id="mission-objective" class="mission-sub">Restore the network uplink.</div><div id="mission-pills" class="status-row"></div></div></div><div class="topright"><div class="stat"><div id="score" class="stat-value">0000</div><div class="stat-label">REPUTATION</div></div><div class="stat"><div id="district-online" class="stat-value">0 / 5</div><div class="stat-label">DISTRICTS</div></div><button id="open-guide" class="icon-btn" title="Field guide [H]">?</button><button id="open-map" class="icon-btn" title="Network map [M]">⌘</button></div></div>
+ <div id="controls-note">WASD MOVE • MOUSE LOOK • <b>E</b> OPERATE • M MAP • H GUIDE • ESC EXIT TERMINAL</div>
+ <div id="ticker"><div class="ticker-title">LIVE DISPATCH FEED // DISTRICT 04</div><div id="ticker-items"></div></div>
+</div>
+<div id="interaction"><strong id="interact-label">DISPATCH-01</strong><small><kbd>E</kbd> OPERATE STATION</small></div>
+<div id="radio-message"><div id="radio-speaker">DISPATCH / INTERNAL RADIO</div><div id="radio-content">No signal.</div></div>
+<div id="progress-toast"><div class="toast-kicker">MILESTONE COMPLETE / +500 REP</div><div class="toast-title" id="toast-title">SYSTEM RESTORED</div><div class="toast-sub" id="toast-sub">Routing restored.</div></div>
+<div id="mobile-controls"><div class="stick" id="stick"><div class="knob" id="stick-knob"></div></div><div class="touch-actions"><button id="touch-map" class="touch-mini">MAP</button><button id="touch-use" class="touch-button">USE</button></div></div>
+<div id="start"><section class="hero"><div class="hero-tag">OPERATIONS SIMULATOR // NIGHT SHIFT / 02:17</div><h1>SIGNAL<span>//</span>ZERO</h1><h2>THE LAST MILE · THREE-DIMENSIONAL PROTOTYPE</h2><p>Half the city has gone offline. You are the only network technician on-site. Walk the operations center, access real-looking device consoles, diagnose the faults and watch each repair bring the district back.</p><p><b>No answer prompts.</b> Find the gear, run tests, change configurations, and verify services.</p><div class="hero-actions"><button class="primary" id="start-new">BEGIN SHIFT →</button><button class="secondary hidden" id="start-resume">RESUME SAVED SHIFT</button></div><div class="hero-steps"><div class="hero-step"><b>01 / WALK THE ROOM</b>WASD and mouse on desktop. On a phone, use the left stick and drag the right side to look.</div><div class="hero-step"><b>02 / ACCESS A MACHINE</b>Approach a workstation, server, switch, router, or the patch panel. Press E or USE.</div><div class="hero-step"><b>03 / FIX AND PROVE IT</b>Issue diagnostic commands and perform the repair. The living city reacts to actual system state.</div></div><div class="hero-bottom">Educational simulation · simplified appliance commands · N10-009 concept slice, not the full certification. Three.js requires network access to load the 3D library on first launch.</div></section></div>
+<div id="desktop" class="hidden" role="dialog" aria-modal="true" aria-label="Workstation interface"><div class="windowbar"><span class="windowicon">NOC</span><div class="window-info"><strong id="station-label">DISPATCH-01 / CLIENT TERMINAL</strong><small id="station-sub">SECURE OPERATIONS SHELL / training image</small></div><button class="close" id="close-desktop" aria-label="Leave workstation">×</button></div><nav class="tabstrip" id="desktop-tabs"><button class="tab active" data-tab="terminal">⌨ TERMINAL</button><button class="tab" data-tab="topology">◈ NETWORK MAP</button><button class="tab" data-tab="manual">▤ FIELD NOTES</button></nav><div class="desktopBody"><div class="mainArea">
+ <section id="terminal-pane"><div class="terminal-head"><span id="terminal-head-text">LOCAL CONSOLE  /  READY</span></div><div id="terminalout" class="terminalout" aria-live="polite"></div><form class="command-line" id="command-form"><span id="prompt" class="prompt">C:\&gt;</span><input id="cmd" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="type help for available commands" aria-label="Network command"><button id="exec" type="submit">EXECUTE ↵</button></form></section>
+ <section id="topology-pane" class="hidden"><div class="topo-intro"><h3>LIVE INFRASTRUCTURE MAP</h3>Links and services reflect the same state as the command line. A working physical link does not guarantee usable applications.</div><div class="map" id="small-map"></div></section>
+ <section id="manual-pane" class="hidden"><div class="manual-intro"><h3>FIELD MANUAL / ACTIVE INCIDENT</h3>Read the symptom. Gather evidence first. There is no multiple-choice answer to select.</div><div class="manual-copy" id="manual-copy"></div></section>
+</div><aside class="sidebar"><h4>DIAGNOSTICS</h4><p>Read-only probes. Select one to run it, or type your own commands in the terminal.</p><div id="quick-commands"></div><h4 style="margin-top:19px">LIVE TELEMETRY</h4><div id="telemetry" class="statuslist"></div><h4>DISPATCH NOTE</h4><p id="sidebar-note">Link is down.</p><button id="open-local-hint" class="secondary" style="padding:10px 13px;width:100%">REQUEST HINT</button><div id="hint-text" class="tiny" style="margin-top:12px"></div></aside></div><div id="desktopFooter"><span>NETWORK OPERATIONS / UNCLASSIFIED TRAINING ENVIRONMENT</span><span>ESC : LEAVE WORKSTATION</span></div></div>
+<div id="patch" class="hidden" role="dialog" aria-label="Patch panel"><section class="patch-card"><div class="modal-bar"><div><div class="micro">RACK C // PHYSICAL CABLING</div><h2>MANUAL PATCH PANEL</h2></div><button class="close" id="close-patch">×</button></div><div class="patch-intro">Take one end of the patch cable from the gateway and terminate it at the corresponding switch port. Both sockets are labeled. A light only proves physical link.</div><div class="patch-bays"><div class="patch-bay"><h3>GATEWAY / GW-01</h3><button class="port" data-port="gw-lan1"><i class="socket"></i>LAN1 / INSIDE</button><button class="port" data-port="gw-wan"><i class="socket"></i>WAN / ISP</button><button class="port" data-port="gw-console"><i class="socket"></i>CONSOLE / MGMT</button></div><div class="patch-bay"><h3>ACCESS SWITCH / SW-01</h3><button class="port" data-port="sw-uplink"><i class="socket"></i>Gi0/1 / UPLINK</button><button class="port" data-port="sw-port6"><i class="socket"></i>Gi0/6 / GUEST AP</button><button class="port" data-port="sw-console"><i class="socket"></i>CONSOLE / MGMT</button></div></div><div class="patch-actions"><button id="patch-submit" class="primary">PATCH SELECTED PAIR</button><button id="patch-unplug" class="secondary">UNPLUG UPLINK</button><div id="patch-output" class="patch-out">Choose one socket on each device.</div></div></section></div>
+<div id="guide" class="hidden" role="dialog" aria-label="Field guide"><section class="guide-card"><div class="modal-bar"><h2>FIELD GUIDE / OPERATOR LOG</h2><button class="close" id="close-guide">×</button></div><div class="guide-copy"><p>This is a network repair game. First understand what is broken, then use the same steps you'd follow on real infrastructure: <b>observe → isolate → change → verify.</b></p><h4>CONTROL ROOM</h4><p><b>WASD</b> move, <b>mouse</b> look, <b>E</b> access a nearby device, <b>M</b> toggle the infrastructure map, <b>H</b> this guide, <b>ESC</b> leave computer. Touch devices use an on-screen stick, swipe-to-look and USE button.</p><h4>DEVICE CONSOLES</h4><p>Approach <b>DISPATCH-01</b> for client checks like <code>ipconfig /all</code>, <code>ping</code>, <code>nslookup</code> and <code>tracert</code>. Use <b>CORE-SRV</b> for DHCP/DNS, <b>ACCESS-SW</b> for VLANs, <b>EDGE-RTR</b> for routes and policies. Use <b>PATCH RACK</b> for physical cables. Type <code>help</code> at each device.</p><h4>LEARNING RULE</h4><p>The five incidents form one connected network. Fixes drive live status, command results, alerts, and the 3D environment. Mistakes can break earlier services. The game never asks which of four answers is correct.</p></div><h3 class="micro">SHIFT CHECKPOINTS</h3><div id="checkpoints" class="checkpoints"></div><div class="hero-actions"><button id="guide-hint" class="secondary">REVEAL NEXT HINT</button><button id="guide-restart" class="secondary">RESTART SHIFT</button><div id="guide-hint-copy" class="hint-block hidden" style="width:100%"></div></div></section></div>
+<div id="map-overlay" class="hidden" role="dialog" aria-label="Network overview"><section class="map-card"><div class="modal-bar"><div><div class="micro">INFRASTRUCTURE SCANNER / LIVE</div><h2>NETWORK TELEMETRY</h2></div><button id="close-map" class="close">×</button></div><div class="map" id="big-map"></div><div id="big-map-note" class="tiny" style="margin-top:8px"></div></section></div>
+<div id="load-error" class="hidden"><div class="error-card"><h2>3D ENGINE DID NOT LOAD</h2><p>The 3D build requires Three.js from a public CDN. Connect to the internet, then reload the file in Chrome, Firefox or Edge.</p><pre id="error-text"></pre></div></div>
+<script>/* SIGNAL//ZERO — deliberately bounded, deterministic Network+ training simulation.
+ * One source of truth for the client CLI, equipment CLI, mission triggers and HUD.
+ * No packet-level emulation is claimed. */
+(function (root) {
+  'use strict';
+  const EXPECTED_DNS = '10.42.1.20';
+  const EXPECTED_ROUTE = '10.42.0.254';
+  const LEVELS = [
+    { id: 'L1', code: 'PHYSICAL / LAYER 1', title: 'THE BROKEN LINK',
+      narrative: 'The district gateway is not reaching the access switch. The clinic reports a hard outage.',
+      objective: 'Trace the uplink, then restore the correct physical patch at the rack.',
+      skill: 'Cable paths, switch uplinks and link status',
+      hint: ['Inspect the rack panel. Look for the gateway LAN port and the switch uplink.', 'A working copper connection needs both ends plugged into the correct ports.'] },
+    { id: 'L2', code: 'NETWORK SERVICES / DHCP', title: 'NO ONE HAS AN ADDRESS',
+      narrative: 'The link is up, but dispatch still cannot contact the gateway. Clients are self-assigning addresses.',
+      objective: 'Diagnose the client, bring DHCP back online, and renew its lease.',
+      skill: 'DHCP DORA sequence, APIPA and address leases',
+      hint: ['At the dispatch PC, run ipconfig /all. An address in 169.254.0.0/16 is a warning sign.', 'Check the service console with services, use dhcp start, then renew the client address with ipconfig /renew.'] },
+    { id: 'L3', code: 'NETWORK SERVICES / DNS', title: 'THE WRONG DESTINATION',
+      narrative: 'Dispatch can contact the clinic by IP, but the clinic name leads to a dead machine.',
+      objective: 'Compare IP and name tests, repair DNS, then verify the clinic web service.',
+      skill: 'DNS A records, resolving names and isolating faults',
+      hint: ['Try ping 10.42.1.20 and nslookup clinic.ops.example at dispatch. Compare their results.', 'At CORE-SRV use dns list and dns set clinic.ops.example 10.42.1.20. Then at DISPATCH run curl https://clinic.ops.example/health. Ping alone tests reachability, not HTTPS.'] },
+    { id: 'L4', code: 'SWITCHING / SECURITY', title: 'UNINVITED GUEST',
+      narrative: 'A guest device can reach clinic equipment. Traffic is leaking across trust boundaries.',
+      objective: 'Separate guest devices, apply a routed access rule, then audit their reachability.',
+      skill: 'VLANs, same-subnet traffic and inter-VLAN filtering',
+      hint: ['At the switch, use show vlan. Guests should use VLAN 30, not the clinic VLAN 10.', 'Move switch port 6 to VLAN 30, then at the router use firewall deny guest clinic. Finish with audit guest. VLANs alone do not guarantee routed isolation.'] },
+    { id: 'L5', code: 'ROUTING / END-TO-END', title: 'THE LAST HOP',
+      narrative: 'The city services are back, but a remote backup endpoint is unreachable through the upstream router.',
+      objective: 'Trace the failing path, fix the default next hop, then test the backup application.',
+      skill: 'Default routes, next-hop gateways and path tracing',
+      hint: ['At dispatch, run tracert 203.0.113.20. The trace ends at the wrong next-hop address.', 'At EDGE-RTR use show routes, then route set default 10.42.0.254. Verify the route with tracert and the application with curl https://backup.example.net/health.'] }
+  ];
+  const START = Object.freeze({
+    uplink: false, dhcpRunning: false, lease: false,
+    dnsRunning: true, dnsA: '10.42.1.99',
+    guestVlan: 10, firewallDeny: false,
+    defaultRoute: '10.42.0.99', verifiedClinic: false,
+    verifiedGuests: false, verifiedRemote: false,
+    stage: 0, score: 0, hintsUsed: 0, changes: 0
+  });
+  const PRETTY = { client: 'DISPATCH-01', server: 'CORE-SRV', switch: 'ACCESS-SW', router: 'EDGE-RTR' };
+  function asHost(h) { return ({ pc: 'client', workstation: 'client', dispatch: 'client', srv: 'server', rtr: 'router', sw: 'switch' })[h] || h; }
+  class NetworkSim {
+    constructor(snapshot) {
+      this.s = { ...START };
+      this.events = [];
+      if (snapshot && typeof snapshot === 'object') {
+        for (const k of Object.keys(START)) if (Object.hasOwn(snapshot, k) && typeof snapshot[k] === typeof START[k]) this.s[k] = snapshot[k];
+        this.s.stage = Math.max(0, Math.min(5, Math.round(this.s.stage)));
+      }
+      this.reconcile();
+    }
+    get stage() { return this.s.stage; }
+    get done() { return this.s.stage === 5; }
+    get levels() { return LEVELS; }
+    get status() {
+      const s = this.s;
+      const leaseOK = s.uplink && s.lease;
+      const linkOK = s.uplink;
+      const clinicByIP = leaseOK;
+      const dnsResolved = leaseOK && s.dnsRunning && s.dnsA === EXPECTED_DNS;
+      const clinicByName = clinicByIP && dnsResolved;
+      const guestCanReach = s.guestVlan === 10 || !s.firewallDeny;
+      const guestSafe = s.guestVlan === 30 && !guestCanReach;
+      const remoteRouteOK = leaseOK && s.defaultRoute === EXPECTED_ROUTE;
+      return { linkOK, leaseOK, clientIP: s.lease ? '10.42.1.101' : (s.uplink ? '169.254.17.44' : '[disconnected]'),
+        clinicByIP, dnsResolved, clinicByName, guestCanReach, guestSafe, remoteRouteOK,
+        gatewayIP: '10.42.1.1', dnsIP: '10.42.1.10', clinicIP: EXPECTED_DNS };
+    }
+    serialize() { return { ...this.s }; }
+    reset() { this.s = { ...START }; this.events = []; }
+    reconcile() {
+      const s = this.s; const st = this.status;
+      // A live DHCP lease survives a server outage or momentary link loss; renewal is separate.
+      if (!st.clinicByName) s.verifiedClinic = false;
+      if (!st.guestSafe) s.verifiedGuests = false;
+      if (!st.remoteRouteOK) s.verifiedRemote = false;
+      const wins = [];
+      const check = [
+        () => this.status.linkOK,
+        () => this.status.leaseOK,
+        () => this.status.clinicByName && s.verifiedClinic,
+        () => this.status.guestSafe && s.verifiedGuests,
+        () => this.status.remoteRouteOK && s.verifiedRemote
+      ];
+      while (s.stage < 5 && check[s.stage]()) {
+        const solved = s.stage;
+        s.stage++;
+        s.score += 500;
+        wins.push({ index: solved, nextStage: s.stage, title: LEVELS[solved].title });
+      }
+      return wins;
+    }
+    patch(a, b) {
+      const left = String(a).toLowerCase().trim(), right = String(b).toLowerCase().trim();
+      if (left === right) return this.response(['The two ends must be different sockets.'], false);
+      if (new Set([left, right]).size === 2 && [left, right].includes('gw-lan1') && [left, right].includes('sw-uplink')) {
+        this.s.uplink = true; this.s.changes++;
+        const wins = this.reconcile();
+        return this.response(['Physical link established: GW-01 LAN1 ↔ SW-01 UPLINK.', 'PHY link: 1 Gbps full duplex / link state UP.', 'Green interface LEDs indicate physical link, not end-to-end service health.'], true, wins);
+      }
+      return this.response(['Cable connected to incompatible endpoints. The gateway uplink is still down.', 'Check both device labels and the path on the network diagram.'], false);
+    }
+    unpatch() { this.s.uplink = false; this.s.changes++; this.reconcile(); return this.response(['Uplink physically disconnected. Traffic is blocked even if a client retains its previous address lease.'], true); }
+    response(lines, changed = false, wins = []) { return { lines, changed, wins, stage: this.s.stage, status: this.status }; }
+    help(host) {
+      if (host === 'client') return ['ipconfig /all', 'ipconfig /renew', 'ping <ip | hostname>', 'nslookup clinic.ops.example', 'tracert 203.0.113.20', 'curl https://<host>/health', 'route print', 'arp -a', 'help'];
+      if (host === 'server') return ['services', 'dhcp status', 'dhcp start', 'dhcp stop', 'dns list', 'dns set <host> <ip>', 'dns start', 'dns stop', 'help'];
+      if (host === 'switch') return ['show interfaces', 'show vlan', 'show mac', 'switch port <number> vlan <id>', 'help'];
+      if (host === 'router') return ['show routes', 'show acl', 'route set default <next-hop>', 'firewall deny guest clinic', 'firewall allow guest clinic', 'audit guest', 'help'];
+      return [];
+    }
+    command(who, raw) {
+      const host = asHost(String(who || '').toLowerCase());
+      const cmd = String(raw || '').replace(/\s+/g, ' ').trim();
+      const lc = cmd.toLowerCase();
+      if (!PRETTY[host]) return this.response(['Unknown system.'], false);
+      if (!cmd) return this.response([], false);
+      if (lc === 'help' || lc === '?') return this.response(['AVAILABLE COMMANDS:', ...this.help(host).map(x => '  '+x)], false);
+      if (lc === 'clear' || lc === 'cls') return { ...this.response([], false), clear: true };
+      let changed = false; const o = []; const s = this.s; const st = this.status;
+      const requireHost = (h) => { if (host !== h) { o.push('Not supported on '+PRETTY[host]+'. Use its help command.'); return false; } return true; };
+      if (lc === 'ipconfig /all' && requireHost('client')) {
+        o.push('Windows IP Configuration', 'Ethernet adapter LAN:',
+          '   Media State . . . . . . . : ' + (s.uplink ? 'Media connected' : 'Media disconnected'),
+          '   IPv4 Address . . . . . . : ' + st.clientIP,
+          '   Subnet Mask . . . . . . . : '+(st.leaseOK?'255.255.255.0':'255.255.0.0'),
+          '   Default Gateway . . . . : '+(st.leaseOK?'10.42.1.1':'[not set]'),
+          '   DHCP Enabled . . . . . . : Yes',
+          '   DHCP Server  . . . . . . : '+(st.leaseOK?'10.42.1.10':'[unreachable]'),
+          '   DNS Servers  . . . . . . : '+(st.leaseOK?'10.42.1.10':'[not set]'));
+      } else if (lc === 'ipconfig /renew' && requireHost('client')) {
+        if (!s.uplink) o.push('DHCP request failed: media disconnected.');
+        else if (!s.dhcpRunning) o.push('DHCP DISCOVER sent; no DHCP OFFER received. Timed out.', s.lease?'Existing lease remains assigned until expiration.':'Client retained automatic private address 169.254.17.44.');
+        else { s.lease=true; changed=true; o.push('DHCP DISCOVER → OFFER → REQUEST → ACK','Assigned 10.42.1.101/24   Gateway 10.42.1.1','Lease obtained from CORE-SRV 10.42.1.10.'); }
+      } else if (lc.startsWith('ping ') && requireHost('client')) {
+        const target = lc.slice(5).trim();
+        if (!target) o.push('Usage: ping <destination>');
+        else if (!st.leaseOK) o.push('PING '+target, 'Request could not be sent: no usable network configuration.', '0 replies; check the interface, IP address and DHCP.');
+        else if (target === 'clinic.ops.example') {
+          if (!s.dnsRunning) o.push('Ping request could not find host clinic.ops.example (DNS offline).');
+          else if (s.dnsA !== EXPECTED_DNS) o.push('Pinging clinic.ops.example ['+s.dnsA+'] with 32 bytes of data:', 'Request timed out. 0 replies / 4 sent.');
+          else { o.push('Pinging clinic.ops.example ['+EXPECTED_DNS+'] with 32 bytes of data:', ...Array(3).fill('Reply from '+EXPECTED_DNS+': bytes=32 time=2ms TTL=63'), '3 replies received. ICMP connectivity verified (HTTPS not yet tested).'); }
+        } else if (['10.42.1.20', '10.42.1.1', '10.42.1.10', '10.42.1.101'].includes(target)) o.push('Pinging '+target+' with 32 bytes of data:', ...Array(3).fill('Reply from '+target+': bytes=32 time=1ms TTL=64'), 'Packets: Sent = 3, Received = 3, Lost = 0 (0% loss)');
+        else if (target === '203.0.113.20' && st.remoteRouteOK) o.push('Pinging 203.0.113.20:', 'Reply from 203.0.113.20: bytes=32 time=18ms TTL=52');
+        else o.push('PING '+target, target==='203.0.113.20' ? 'Reply from 10.42.1.1: Destination host unreachable.' : 'Request timed out.', '0 replies received.');
+      } else if (lc.startsWith('nslookup') && requireHost('client')) {
+        const target = lc.replace(/^nslookup\s*/, '') || 'clinic.ops.example';
+        if (!st.leaseOK) o.push('DNS request timed out. No usable client network address.');
+        else if (!s.dnsRunning) o.push('DNS request timed out: name server 10.42.1.10 not responding.');
+        else if (target === 'clinic.ops.example') o.push('Server: CORE-SRV   Address: 10.42.1.10', 'Non-authoritative answer:', 'Name: clinic.ops.example', 'Address: '+s.dnsA, s.dnsA===EXPECTED_DNS?'Record currently matches the reachable clinic host.':'Note: A successful lookup does not prove the target is online.');
+        else if (target === 'backup.example.net') o.push('Server: CORE-SRV   Address: 10.42.1.10','Name: backup.example.net','Address: 203.0.113.20');
+        else o.push('** CORE-SRV cannot find '+target+': NXDOMAIN');
+      } else if ((lc.startsWith('tracert ') || lc.startsWith('traceroute ')) && requireHost('client')) {
+        const target = lc.replace(/^trace(?:rt|route)\s*/, '').trim();
+        if (target !== '203.0.113.20') o.push('In this district scenario, traceroute target is 203.0.113.20.');
+        else if (!st.leaseOK) o.push('Unable to trace route: client has no valid network configuration.');
+        else if (s.defaultRoute !== EXPECTED_ROUTE) o.push('Tracing route to 203.0.113.20:', ' 1    <1 ms  10.42.1.1   (local router)', ' 2     *     10.42.0.99  (unreachable next hop)', 'Trace incomplete. Inspect the default route on EDGE-RTR.');
+        else { o.push('Tracing route to 203.0.113.20:', ' 1    <1 ms  10.42.1.1   (EDGE-RTR)', ' 2     5 ms  10.42.0.254 (upstream)', ' 3    18 ms  203.0.113.20 (remote backup endpoint)', 'Trace complete. Routing path verified; test the application separately.'); }
+      } else if (lc.startsWith('curl ') && requireHost('client')) {
+        const url=lc.replace(/^curl\s+(-i\s+)?/, '').trim();
+        if (!['https://clinic.ops.example/health','https://backup.example.net/health'].includes(url)) o.push('This training build exposes: curl https://clinic.ops.example/health or curl https://backup.example.net/health');
+        else if (!st.leaseOK) o.push('curl: (7) Failed to connect: no usable network path.');
+        else if (!s.dnsRunning) o.push('curl: (6) Could not resolve host: DNS service offline.');
+        else if (url.includes('clinic.ops.example') && s.dnsA !== EXPECTED_DNS) o.push('Resolving clinic.ops.example → '+s.dnsA, 'curl: (28) Connection timed out on 443; stale DNS A record.');
+        else if (url.includes('clinic.ops.example')) {o.push('HTTP/2 200 OK','server: clinic-health/1.0','content-type: application/json','{"service":"clinic","state":"healthy"}','HTTPS endpoint verified.');s.verifiedClinic=true;changed=true;}
+        else if (!st.remoteRouteOK) o.push('curl: (7) Failed to connect to backup.example.net:443.', 'Local route uses unreachable next hop '+s.defaultRoute+'.');
+        else {o.push('HTTP/2 200 OK','server: backup-api/1.0','content-type: application/json','{"backup":"ready","uploads":"accepted"}','Remote HTTPS application verified.');s.verifiedRemote=true;changed=true;}
+      } else if (lc === 'route print' && requireHost('client')) o.push('IPv4 Route Table', '0.0.0.0/0 via '+(st.leaseOK?'10.42.1.1':'[no gateway]'), '10.42.1.0/24 On-link '+(st.leaseOK?'10.42.1.101':'[inactive]'));
+      else if (lc === 'arp -a' && requireHost('client')) o.push('Interface: '+st.clientIP, ...(st.leaseOK?['10.42.1.1   02-42-1a-00-00-01 dynamic','10.42.1.20  02-42-1a-00-00-14 dynamic']:['No resolved neighbors.']));
+      else if (lc === 'services' && requireHost('server')) o.push('CORE-SRV NETWORK SERVICES', 'DHCP : '+(s.dhcpRunning?'RUNNING':'STOPPED')+' / scope 10.42.1.100-10.42.1.199', 'DNS  : '+(s.dnsRunning?'RUNNING':'STOPPED')+' / clinic.ops.example → '+s.dnsA, 'Host : 10.42.1.10/24');
+      else if (lc === 'dhcp status' && requireHost('server')) o.push('DHCP service: '+(s.dhcpRunning?'RUNNING':'STOPPED'), 'Scope 10.42.1.0/24 | pool 10.42.1.100 – 10.42.1.199', 'Active leases: '+(st.leaseOK?'1':'0'));
+      else if (lc === 'dhcp start' && requireHost('server')) { s.dhcpRunning = true; changed=true; o.push('DHCP service started. Listening for DISCOVER broadcasts.', 'Clients must request/renew their address.'); }
+      else if (lc === 'dhcp stop' && requireHost('server')) { s.dhcpRunning = false; changed=true; o.push('DHCP service stopped. Existing leases remain valid until their expiration; new leases and renewals will fail.'); }
+      else if (lc === 'dns list' && requireHost('server')) o.push('DNS SERVICE '+(s.dnsRunning?'RUNNING':'STOPPED'),'zone clinic.ops.example', 'A  clinic.ops.example   '+s.dnsA+'   TTL=60s', 'Healthy clinic host (reference): 10.42.1.20');
+      else if (lc.startsWith('dns set ') && requireHost('server')) {
+        const match = /^dns set (\S+) (\d+\.\d+\.\d+\.\d+)$/i.exec(lc);
+        if (!match || match[1] !== 'clinic.ops.example' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(match[2]) || match[2].split('.').some(x => +x > 255)) o.push('Usage: dns set clinic.ops.example <valid IPv4 address>');
+        else { s.dnsA = match[2]; s.verifiedClinic=false; changed=true; o.push('A record updated: clinic.ops.example → '+s.dnsA, 'Training DNS cache invalidated. Verify from the client.'); }
+      } else if (lc === 'dns start' && requireHost('server')) { s.dnsRunning=true; changed=true; o.push('DNS service started.'); }
+      else if (lc === 'dns stop' && requireHost('server')) { s.dnsRunning=false; s.verifiedClinic=false; changed=true; o.push('DNS service stopped. Name resolution unavailable.'); }
+      else if (lc === 'show interfaces' && requireHost('switch')) o.push('ACCESS-SW interface status:', 'Gi0/1  UPLINK  '+(s.uplink?'up/up   1000/full':'down/down'), 'Gi0/2  DISPATCH  up/up   1000/full', 'Gi0/6  GUEST-AP  up/up   1000/full  VLAN '+s.guestVlan, 'Errors: 0 | Discards: 0');
+      else if (lc === 'show vlan' && requireHost('switch')) o.push('VLAN    NAME          PORTS', '10      CLINIC        Gi0/2'+(s.guestVlan===10?', Gi0/6':''), '30      GUEST         '+(s.guestVlan===30?'Gi0/6':'[none]'), 'Note: port 6 carries the guest access point.');
+      else if (lc === 'show mac' && requireHost('switch')) o.push('MAC ADDRESS TABLE', '02:42:1A:00:00:64  Gi0/2 VLAN10', '02:42:1A:00:00:C8  Gi0/6 VLAN'+s.guestVlan);
+      else if (lc.startsWith('switch port ') && requireHost('switch')) {
+        const match = /^switch port (\d+) vlan (\d+)$/i.exec(lc);
+        if (!match || +match[1] !== 6 || ![10,30].includes(+match[2])) o.push('This lab manages access port 6, with provisioned VLANs 10 (clinic) and 30 (guest).', 'Usage: switch port 6 vlan <10|30>');
+        else { s.guestVlan=+match[2]; s.verifiedGuests=false; changed=true; o.push('ACCESS-SW Gi0/6 assigned to VLAN '+s.guestVlan+'.', 'Inter-VLAN routing policy is a separate security control.'); }
+      } else if (lc === 'show routes' && requireHost('router')) o.push('EDGE-RTR IPv4 routing table', 'C  10.42.1.0/24 directly connected Gi0/1', 'C  10.42.0.0/24 directly connected Gi0/0', 'S* 0.0.0.0/0 via '+s.defaultRoute, s.defaultRoute===EXPECTED_ROUTE?'Next hop reachable.':'Warning: configured next hop is not responding.');
+      else if (lc === 'show acl' && requireHost('router')) o.push('EDGE-RTR security policy', 'GUEST vlan 30 → CLINIC vlan 10 : '+(s.firewallDeny?'DENY':'ALLOW'), 'VLAN 10 local switching bypasses this routed policy.', 'Default outbound Internet policy: ALLOW');
+      else if (lc.startsWith('route set default ') && requireHost('router')) {
+        const ip = lc.replace('route set default ','').trim();
+        if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) || ip.split('.').some(x => +x > 255)) o.push('Usage: route set default <IPv4 next-hop>');
+        else { s.defaultRoute=ip; s.verifiedRemote=false; changed=true; o.push('Default route changed: 0.0.0.0/0 via '+ip, 'Check reachability with a fresh traceroute from dispatch.'); }
+      } else if (lc === 'firewall deny guest clinic' && requireHost('router')) { s.firewallDeny=true; s.verifiedGuests=false; changed=true; o.push('Policy applied: deny VLAN30 → VLAN10.', 'Same-VLAN clients do not cross the router. Confirm source port VLAN, then run audit guest.'); }
+      else if (lc === 'firewall allow guest clinic' && requireHost('router')) { s.firewallDeny=false; s.verifiedGuests=false; changed=true; o.push('Policy applied: allow VLAN30 → VLAN10. Review security impact.'); }
+      else if (lc === 'audit guest' && requireHost('router')) {
+        o.push('Synthetic access probe from GUEST-AP to CLINIC:', 'Switchport Gi0/6 VLAN: '+s.guestVlan,
+          'Guest → clinic: '+(st.guestCanReach?'REACHABLE [EXPOSURE]':'BLOCKED [POLICY MATCH]'));
+        if (st.guestSafe) { s.verifiedGuests=true; changed=true; o.push('Two protections verified: guest segment separated and routed access denied.'); }
+        else if (s.guestVlan===10) o.push('Guest and clinic traffic share VLAN 10; router ACL cannot isolate same-segment traffic.');
+        else o.push('Guest VLAN 30 is distinct, but inter-VLAN routing remains allowed.');
+      } else o.push('Unknown command on '+PRETTY[host]+': '+cmd, 'Type help to see supported operations.');
+      if (changed) s.changes++;
+      const wins = this.reconcile();
+      return this.response(o, changed, wins);
+    }
+  }
+  root.SignalZeroSim = NetworkSim;
+  root.SignalZeroLevels = LEVELS;
+  if (typeof module !== 'undefined' && module.exports) module.exports = { NetworkSim, LEVELS, START };
+})(typeof window === 'undefined' ? globalThis : window);
+</script>
+<script type="module">
+try {
+  const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js');
+  /* Inside an async module scope with THREE from three.js 0.186.1.
+ * First-person presentation is a layer around the stateful networking simulation. */
+const $ = id => document.getElementById(id);
+const simStorageKey = 'signal-zero-3d-v02-run';
+const touchDevice = window.matchMedia('(pointer: coarse)').matches;
+let sim = new window.SignalZeroSim();
+let gameStarted = false;
+let activeModal = null;
+let activeStation = 'client';
+let selectedPorts = [];
+let hintReveal = 0;
+let toastTimer = null;
+let radioTimer = null;
+let historyIndex = 0;
+const terminalHistory = { client:[], server:[], switch:[], router:[] };
+const submittedCommands = { client:[], server:[], switch:[], router:[] };
+const stationInfo = {
+  client: { name:'DISPATCH-01', title:'CLINIC DISPATCH / WORKSTATION', desc:'A Windows-style client with tools for addressing, reachability, name lookup, and tracing.', tips:['ipconfig /all','ping 10.42.1.20','nslookup clinic.ops.example','tracert 203.0.113.20','curl https://clinic.ops.example/health','curl https://backup.example.net/health'] },
+  server: { name:'CORE-SRV', title:'NETWORK SERVICES / APPLIANCE', desc:'Controls DNS and DHCP. This is a simplified training appliance shell, not native Windows or Linux syntax.', tips:['services','dhcp status','dns list'] },
+  switch: { name:'ACCESS-SW', title:'ACCESS SWITCH / PORT MANAGEMENT', desc:'Inspect link state and VLAN membership, then configure access ports in the switch CLI.', tips:['show interfaces','show vlan','show mac'] },
+  router: { name:'EDGE-RTR', title:'GATEWAY / ROUTING & POLICY', desc:'Inspect route tables, inter-VLAN policy, and the path a guest device can take to clinic equipment.', tips:['show routes','show acl','audit guest'] },
+  patch: {name:'PATCH RACK',title:'LAYER 1 / RACK C'},
+  map: {name:'CITY NETWORK',title:'TELEMETRY / NETWORK TABLE'}
+};
+const stations = [
+  {id:'client', x:-6.45, z:-3.2, display:'DISPATCH-01', category:'CLIENT'},
+  {id:'server', x:-2.15, z:-3.2, display:'CORE-SRV', category:'SERVICES'},
+  {id:'switch', x:2.15, z:-3.2, display:'ACCESS-SW', category:'SWITCHING'},
+  {id:'router', x:6.45, z:-3.2, display:'EDGE-RTR', category:'ROUTING'},
+  {id:'patch', x:-6.45, z:3.1, display:'PATCH RACK', category:'CABLES'},
+  {id:'map', x:0, z:1.45, display:'NETWORK TABLE', category:'TOPOLOGY'}
+];
+const savedRun = (() => {try {return JSON.parse(localStorage.getItem(simStorageKey)||'null')}catch(_){return null}})();
+if(savedRun && typeof savedRun === 'object' && savedRun.stage >= 0) $('start-resume').classList.remove('hidden');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x030c16);
+scene.fog = new THREE.FogExp2(0x040b16,.017);
+const camera = new THREE.PerspectiveCamera(69, window.innerWidth / window.innerHeight, .06, 125);
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,touchDevice?1.4:1.8));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.55;
+$('view').append(renderer.domElement);
+let yaw=0, pitch=-0.09;
+const player={x:0,y:1.72,z:5.5};
+const keyHeld={};
+let virtualX=0,virtualY=0;
+const timer = new THREE.Clock();
+const amber=0xffbf79, green=0x64ffbd, red=0xff6e80,blue=0x6acafc, cyan=0x59deda;
+const material=(color, emissive=0, intensity=0, metalness=.2, roughness=.58, opacity=1)=>new THREE.MeshStandardMaterial({color, emissive, emissiveIntensity:intensity, metalness, roughness, transparent:opacity<1, opacity});
+const MAT={floor:material(0x14202a,0,0,.3,.63),wall:material(0x0b1721,0,0,.4,.72),metal:material(0x243946,0,0,.8,.26),dark:material(0x051019,0,0,.3,.45),display:material(0x0a2534,0x0a3044,.75,.2,.3),glass:material(0x183e52,0x113246,.2,.55,.16,.6),edge:material(0x0b6b77,0x16aaab,.45,.2,.3),bench:material(0x1d2b36,0,0,.5,.55),amber:material(0xffb573,0xbd5b22,.5,.3,.4),red:material(0xdd526e,0x9f1538,.7,.2,.3),green:material(0x55e6a9,0x00d087,.7,.3,.25)};
+const dynamic={leds:[],lineSegments:[],monitorPanels:{},monitorScreens:{},cityWindows:[],powerLights:[],holoNodes:[],door:null,ring:null,alarmLight:null,animated:[]};
+function box(w,h,d,x,y,z,mat,parent=scene){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);o.position.set(x,y,z);parent.add(o);return o}
+function sphere(r,x,y,z,mat,parent=scene){const o=new THREE.Mesh(new THREE.SphereGeometry(r,12,9),mat);o.position.set(x,y,z);parent.add(o);return o}
+function cylinder(r1,r2,h,x,y,z,mat,parent=scene,segments=16){const o=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,segments),mat);o.position.set(x,y,z);parent.add(o);return o}
+function lineBetween(a,b,color,width=1){const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a),new THREE.Vector3(...b)]);const l=new THREE.Line(g,new THREE.LineBasicMaterial({color,transparent:true,opacity:width}));scene.add(l);return l}
+function textTexture(text,opts={}){
+  const c=document.createElement('canvas');c.width=opts.width||512;c.height=opts.height||128;
+  const x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);
+  if(opts.bg){x.fillStyle=opts.bg;x.fillRect(0,0,c.width,c.height)}
+  x.textAlign=opts.align||'center'; x.textBaseline='middle';x.fillStyle=opts.color||'#b9fcf0';x.font=`${opts.bold||850} ${opts.font||34}px ${opts.family||'Consolas, monospace'}`;
+  const lines=Array.isArray(text)?text:String(text).split('\n');
+  lines.forEach((t,i)=>x.fillText(t,opts.align==='left'?18:c.width/2,(c.height/(lines.length+1))*(i+1),c.width-25));
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=2;return t;
+}
+function sign(txt,x,y,z,w=2.8,h=.38,opts={}){
+  const tex=textTexture(txt,{width:768,height:122,font:opts.font||37,color:opts.color||'#c6eeef',bg:opts.bg||'#112c39',align:'center'});
+  const p=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide}));p.position.set(x,y,z);scene.add(p);return p;
+}
+function monitor(x,y,z,w,h,lines,host){
+  const texture=textTexture(lines,{width:650,height:340,font:35,color:'#7be9db',bg:'#041e2a',align:'left'});
+  const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide}));mesh.position.set(x,y,z);scene.add(mesh);dynamic.monitorScreens[host]=mesh;dynamic.monitorPanels[host]=texture;
+}
+function refreshMonitor(host, lines){const old=dynamic.monitorPanels[host];if(old) old.dispose();const texture=textTexture(lines,{width:650,height:340,font:33,color:'#8af1de',bg:'#051a26',align:'left'});dynamic.monitorScreens[host].material.map=texture;dynamic.monitorScreens[host].material.needsUpdate=true;dynamic.monitorPanels[host]=texture;}
+// Architecture: floor, paneling and overhead ducts.
+box(20,.3,16,0,-.18,0,MAT.floor);
+const grid=new THREE.GridHelper(20,40,0x276475,0x1c3947);grid.position.y=.003;grid.material.transparent=true;grid.material.opacity=.4;scene.add(grid);
+box(20,5,.3,0,2.5,8,MAT.wall);box(.3,5,16,-10,2.5,0,MAT.wall);box(.3,5,16,10,2.5,0,MAT.wall);
+box(20,.32,16,0,5.5,0,MAT.wall);
+for(let x=-9.5;x<10;x+=1){box(.06,.02,15.6,x,5.29,0,material(0x0c343d,0x008da2,.4))}
+for(let z=-7;z<=7;z+=3.5){box(19.6,.1,.2,0,5.22,z,MAT.metal);box(19,.035,.035,0,5.06,z+.12,material(0x52e3db,0x16bdac,1.2))}
+for(let x of [-8.5,-4.3,0,4.3,8.5]){box(.11,4,.16,x,2.7,7.81,MAT.metal)}
+for(let x=-9.5;x<=9.5;x+=2.5){box(2,.06,.1,x,4.7,7.77,material(0x275e6b,0x09978e,.75));box(2,.12,.18,x,.32,7.79,MAT.metal)}
+// Window wall, distant city silhouettes and a secured door.
+box(20,1.2,.24,0,4.95,-8,MAT.wall);
+box(20,.82,.24,0,.42,-8,MAT.wall);
+for(let x=-10;x<10;x+=2.5)box(.18,3.6,.35,x,2.7,-7.95,MAT.metal);
+const cityMat=[material(0x182838,0x071927,.3,.4,.55),material(0x22394b,0x113444,.4,.25,.5),material(0x0d2639,0x092433,.4,.2,.4)];
+for(let i=0;i<26;i++){
+  const x=-16+(i*.97),h=2.3+(i*7%8)*.5,z=-12-(i%5)*1.6;
+  box(.7+(i%3)*.3,h,.9+(i%4)*.2,x,h/2,z,cityMat[i%3]);
+  for(let r=.5;r<h-.3;r+=.43){const ww=box(.06,.12,.025,x-.17,r,z+.57,material(0x2c7e82,0x00a3c1,.5));dynamic.cityWindows.push({mesh:ww,index:i+r,seed:(i*3+Math.floor(r*7))%7});}
+}
+// Corridor access bulkhead opens as the district recovers.
+box(3.2,3.8,.35,8.1,2.28,-7.75,MAT.metal);box(2.6,3.38,.18,8.1,2.28,-7.52,MAT.dark);
+const door=box(2.5,3.15,.16,8.1,2.18,-7.34,material(0x2a3c46,0x202c36,.14,.7,.3));dynamic.door=door;
+box(.10,3.4,.3,6.7,2.25,-7.36,MAT.edge);box(.10,3.4,.3,9.5,2.25,-7.36,MAT.edge);
+sign('SECTOR B  /  ACCESS LOCK',8.05,4.23,-7.32,2.7,.32,{font:31,color:'#ffcaae'});
+// Unlockable maintenance corridor: a real place the player can enter once access services recover.
+box(3.1,.32,6.7,8.1,-.18,-11.0,MAT.floor);
+box(.22,4.7,6.7,6.45,2.3,-11.0,MAT.wall);
+box(.22,4.7,6.7,9.9,2.3,-11.0,MAT.wall);
+box(3.2,4.7,.27,8.1,2.35,-14.3,MAT.wall);
+box(3.25,.20,6.7,8.1,5.04,-11.0,MAT.metal);
+for(let z=-8.5;z>=-14;z-=1.0){
+  box(2.9,.04,.05,8.12,.04,z,material(0x14717a,0x059c9b,.65));
+  box(1.8,.05,.23,8.13,4.86,z,material(0x4edfc4,0x30d3ad,.85));
+}
+for(let z of [-9.6,-11.2,-12.8]){
+  const rack=box(.8,3.2,1,7.05,1.65,z,MAT.metal);
+  for(let h=0;h<6;h++){box(.64,.23,.05,7.05,.4+h*.44,z+.56,MAT.dark);box(.08,.06,.025,6.83,.45+h*.44,z+.61,MAT.green)}
+  box(.65,2.8,.12,9.42,1.59,z,MAT.display);
+}
+sign('SECTOR B // BACKUP ARRAY',8.12,3.97,-14.08,3.0,.46,{font:35,color:'#b9f6e4'});
+const backupStatus=box(1.4,.14,.10,8.1,2.45,-14.03,MAT.red);
+dynamic.backupStatus=backupStatus;
+// Ceiling light strips, some will change status along with network services.
+const hemi=new THREE.HemisphereLight(0x729eb9,0x0c1418,1.15);scene.add(hemi);
+const fill=new THREE.AmbientLight(0x30475c,.65);scene.add(fill);
+const emergency=new THREE.PointLight(red,35,17,2);emergency.position.set(-7.8,4.5,3);scene.add(emergency);dynamic.alarmLight=emergency;
+for(let i=0;i<5;i++){const x=-8+i*4;const p=new THREE.PointLight(blue,8,10,2);p.position.set(x,4.5,-1.6);scene.add(p);dynamic.powerLights.push(p);box(1.35,.04,.3,x,5.02,-1.6,material(0x72d5e3,0x0b9daa,1.2));}
+// Floor route lines carry diegetic position cues.
+for(let x of [-7.5,7.5])box(.045,.025,11,x,.04,.15,material(0x378898,0x09b8d1,.6));
+box(13,.022,.055,0,.05,-5.1,material(0x3b95a1,0x36ddcf,.65));
+for(let i=-7;i<=7;i+=1.5)box(.28,.02,.6,i,.05,5.2,material(0x226575,0x2296a4,.45));
+// Workstations have keyboards, a chair, a lit faceplate, and screens whose content changes with network state.
+function buildConsole(s){
+  const x=s.x,z=s.z;
+  const rack=box(3.3,1.08,1.15,x,.55,z-.32,MAT.metal);
+  box(3.55,.12,1.47,x,1.12,z-.2,MAT.bench);
+  box(2.42,1.45,.13,x,1.97,z-.83,MAT.dark);
+  box(2.53,1.55,.18,x,1.97,z-.93,MAT.metal);
+  box(2.3,1.29,.03,x,2,z-.817,MAT.display);
+  monitor(x,2,z-.795,2.18,1.13,['> boot','status: unknown'],s.id);
+  box(1.54,.06,.39,x,1.2,z+.21,MAT.dark);
+  for(let i=0;i<13;i++)box(.08,.018,.064,x-.57+i*.095,1.245,z+.19,MAT.metal);
+  box(.38,.025,.3,x+1.13,1.2,z+.19,MAT.metal);
+  cylinder(.16,.18,.5,x,.8,z+1.1,MAT.metal);
+  const chair=box(.92,.13,.63,x,.54,z+1.22,MAT.dark);
+  box(.89,.7,.14,x,.95,z+1.58,MAT.metal);chair.rotation.y=.03;
+  const faceplate=box(2.95,.27,.075,x,.80,z+.27,MAT.dark);
+  for(let i=0;i<10;i++){const led=box(.11,.07,.014,x-1.25+i*.27,.83,z+.316,MAT.red);dynamic.leds.push({mesh:led,station:s.id,index:i})}
+  sign(s.display,x,3.02,z-.81,2.9,.44,{font:41,color:'#c5eff7'});
+  sign(s.category+' // OPERATE  [E]',x,2.77,z-.81,2.2,.22,{font:24,color:'#73a9b4'});
+}
+for(const s of stations)if(['client','server','switch','router'].includes(s.id))buildConsole(s);
+// Physical patch equipment, ports and power indicators.
+const px=-6.45,pz=3.1;
+box(3.25,3.2,.78,px,1.67,pz,MAT.metal);
+box(2.85,2.78,.08,px,1.72,pz+.44,MAT.dark);
+for(let j=0;j<7;j++){
+  box(2.5,.25,.12,px,2.74-j*.35,pz+.5,j%2?MAT.metal:MAT.display);
+  for(let i=0;i<10;i++){const socket=box(.13,.10,.015,px-1.04+i*.225,2.74-j*.35,pz+.58,MAT.dark);if((j*10+i)%5===0){const led=sphere(.025,px-1.04+i*.225,2.83-j*.35,pz+.60,MAT.red);dynamic.leds.push({mesh:led,station:'patch',index:j+i})}}
+}
+sign('RACK C  /  PATCH BAY',px,3.68,pz+.57,3.1,.44,{font:37,color:'#bff6ed'});
+const cable=new THREE.Mesh(new THREE.TorusGeometry(.43,.035,6,32,Math.PI*1.3),MAT.red);cable.position.set(px,1.18,pz+.74);scene.add(cable);dynamic.animated.push(cable);
+// Holographic central tactical map; same network graph as terminals.
+const mx=0,mz=1.45;
+cylinder(1.65,1.8,.27,mx,.98,mz,MAT.metal);
+cylinder(1.4,1.4,.08,mx,1.13,mz,material(0x0a3d4c,0x14a4ac,.65,.55,.2,.6),scene,32);
+const holoRing=new THREE.Mesh(new THREE.TorusGeometry(1.27,.025,7,60),new THREE.MeshBasicMaterial({color:cyan}));holoRing.rotation.x=Math.PI/2;holoRing.position.set(mx,1.33,mz);scene.add(holoRing);dynamic.ring=holoRing;
+for(let i=0;i<7;i++){
+ const a=i/7*Math.PI*2; const node=sphere(.085,mx+Math.cos(a)*.95,1.64+Math.sin(i*3)*.12,mz+Math.sin(a)*.95,material(0x62dfed,0x49dff0,.8));dynamic.holoNodes.push(node);
+}
+const holoLight=new THREE.PointLight(cyan,3,6,2);holoLight.position.set(0,2.3,1.45);scene.add(holoLight);
+sign('CITY NETWORK / LIVE STATE',0,2.62,mz,3.18,.32,{font:32,color:'#c3fff6',bg:'#082634'});
+// Floating particulate, low draw-call Points cloud.
+const starCount=180;
+const stars=new Float32Array(starCount*3);
+for(let i=0;i<starCount;i++){stars[i*3]=-9.5+(i*11.45%19);stars[i*3+1]=.3+(i*2.77%4.6);stars[i*3+2]=-7+(i*5.193%14);}
+const dustGeo=new THREE.BufferGeometry();dustGeo.setAttribute('position',new THREE.BufferAttribute(stars,3));const dust=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0x94d9e8,size:.022,transparent:true,opacity:.35,sizeAttenuation:true}));scene.add(dust);
+
+function networkMapMarkup(){
+ const st=sim.status,s=sim.s;
+ const edges=[
+ ['ISP','RTR',st.remoteRouteOK],['RTR','SW',st.linkOK],['SW','PC',st.leaseOK],['SW','SRV',st.linkOK],['SW','GUEST',s.guestVlan===30],['SRV','CLINIC',st.clinicByName]
+ ];
+ const nodes={ ISP:[85,78,'REMOTE','203.0.113.20'],RTR:[245,78,'EDGE-RTR','10.42.1.1'],SW:[408,178,'ACCESS-SW','VLAN 10/30'],PC:[245,291,'DISPATCH','10.42.1.101'],SRV:[570,78,'CORE-SRV','DHCP + DNS'],GUEST:[570,282,'GUEST-AP','PORT 6'],CLINIC:[737,178,'CLINIC','10.42.1.20']};
+ return '<svg viewBox="0 0 825 365" role="img" aria-label="Diagram showing remote backup, router, switch, server, dispatch PC, clinic and guest AP">'+
+ edges.map(([a,b,ok])=>{const A=nodes[a],B=nodes[b],klass=ok?'cable':'cable down';return `<line class="${klass}" x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}"></line>`}).join('')+
+ Object.entries(nodes).map(([k,n])=>`<g><rect class="node" x="${n[0]-66}" y="${n[1]-29}" width="132" height="58" rx="8"/><text class="nodeLabel" x="${n[0]}" y="${n[1]-5}">${n[2]}</text><text class="nodeSub" x="${n[0]}" y="${n[1]+14}">${n[3]}</text></g>`).join('')+
+ `<text x="15" y="350" fill="#8cbdc9" font-size="11" font-family="monospace">GREEN = WORKING REQUIREMENT   //   RED DASH = FAILURE / MISCONFIGURATION</text></svg>`;
+}
+function updateMap(){const html=networkMapMarkup();$('small-map').innerHTML=html;$('big-map').innerHTML=html;const st=sim.status;$('big-map-note').textContent=`Physical uplink ${st.linkOK?'UP':'DOWN'} · Dispatch ${st.clientIP} · DNS ${sim.s.dnsA} · Guest access ${st.guestSafe?'ISOLATED':'EXPOSED'} · Backup ${st.remoteRouteOK?'REACHABLE':'DOWN'}. Green indicates this simplified scenario's service requirement, not raw wire state.`;}
+function telemetryRows(){const st=sim.status;return [['UPLINK',st.linkOK],['DHCP LEASE',st.leaseOK],['CLINIC NAME',st.clinicByName],['GUEST ISOLATION',st.guestSafe],['REMOTE ROUTE',st.remoteRouteOK]].map(([name,ok])=>`<div class="statusline ${ok?'ok':'fail'}"><span>${name}</span><b>${ok?'ONLINE':'FAULT'}</b></div>`).join('')}
+function updateMission(){
+ const lv=window.SignalZeroLevels[Math.min(sim.stage,4)],st=sim.status;
+ $('mission-code').textContent=sim.done?'SHIFT COMPLETE / 05 OF 05':`${String(sim.stage+1).padStart(2,'0')} / 05 · ${lv.code}`;
+ $('mission-title').textContent=sim.done?'CITY BACK ONLINE':lv.title;
+ $('mission-objective').textContent=sim.done?'Five network faults repaired. All districts operational. Keep exploring or restart to practice.':lv.objective;
+ $('mission-pills').innerHTML=[['LINK',st.linkOK],['DHCP',st.leaseOK],['DNS',st.clinicByName],['SECURE',st.guestSafe],['WAN',st.remoteRouteOK]].map(([n,ok])=>`<span class="pill ${ok?'up':'down'}"><span>●</span>${n}</span>`).join('');
+ $('district-online').textContent=sim.stage+' / 5';
+ $('score').textContent=String(sim.s.score).padStart(4,'0');
+ $('telemetry').innerHTML=telemetryRows();
+ $('sidebar-note').textContent=sim.done?'All services respond to network state. You can still change equipment and test failure modes.':lv.narrative;
+ $('ticker-items').innerHTML=[
+  ['PHYSICAL / SW01 UPLINK',st.linkOK?'CARRIER DETECTED':'LINK DOWN'],
+  ['DISPATCH / CLIENT',st.leaseOK?'DHCP '+st.clientIP:'UNCONFIGURED '+st.clientIP],
+  ['CLINIC / ACCESS',st.clinicByName?'SERVICE RESTORED':'NAME/CONNECTIVITY FAULT'],
+  ['GUEST / SECURITY',st.guestSafe?'ACCESS DENIED':'EXPOSURE DETECTED'],
+  ['BACKUP / REMOTE',st.remoteRouteOK?'PATH HEALTHY':'NEXT HOP UNAVAILABLE']
+ ].slice(0,4).map(([a,b])=>`<div class="ticker-line"><span style="color:#6e9baa">${a}</span><br>${b}</div>`).join('');
+ $('checkpoints').innerHTML=window.SignalZeroLevels.map((lev,i)=>`<div class="checkpoint ${i<sim.stage?'done':''}">${i<sim.stage?'✓':'□'} &nbsp; ${String(i+1).padStart(2,'0')} · ${lev.title}</div>`).join('');
+ const goal=sim.done?'SIMULATION COMPLETE':lv.skill;
+ $('manual-copy').innerHTML=`<h4>${sim.done?'CERTIFICATION SKILL TRANSFER':'CURRENT CONCEPT'}</h4><p>${goal}</p><h4>INCIDENT BRIEF</h4><p>${sim.done?'You have restored five connected networking requirements. Real Network+ preparation needs more scenarios, tools, and validated transfer exercises.':lv.narrative}</p><h4>WHAT GOOD ENGINEERS DO</h4><ul><li>Read the failure symptom, not just the alarm color.</li><li>Collect evidence at the closest useful layer.</li><li>Change one setting at a time and retest from the affected client.</li><li>Verify application behavior and check for collateral damage.</li></ul><h4>COMMAND SET</h4><p>This training build uses Windows-style client commands and a small, fictional network-device CLI. It does not claim to reproduce any vendor's full CLI or real packet timings.</p>`;
+ updateMap();
+}
+function refreshWorld(){
+ const st=sim.status,s=sim.s;
+ dynamic.powerLights.forEach((light,i)=>{const good=i<sim.stage;light.color.setHex(good?green:(i===0?amber:blue));light.intensity=good?12:4.0;});
+ emergency.intensity=sim.done?0:st.linkOK?3:15;
+ dynamic.leds.forEach(({mesh,station,index})=>{
+  const ok=station==='client'?st.leaseOK:station==='server'?s.dhcpRunning:station==='switch'?st.linkOK:station==='router'?st.remoteRouteOK:st.linkOK;
+  mesh.material=ok?MAT.green:MAT.red;
+ });
+ const enabled=sim.stage>=3;door.userData.open=enabled;if(dynamic.backupStatus)dynamic.backupStatus.material=st.remoteRouteOK?MAT.green:MAT.red;
+ dynamic.cityWindows.forEach((w,i)=>{const shouldOn=w.seed < Math.max(1,sim.stage+1) && (i%11!==0);w.mesh.material=shouldOn?MAT.green:MAT.dark;});
+ refreshMonitor('client',[`DISPATCH-01  //  CLIENT`,`IP  ${st.clientIP}`,`LAN ${st.linkOK?'LINK UP':'CARRIER DOWN'}`,`CLINIC ${st.clinicByName?'REACHABLE':'UNAVAILABLE'}`,`type help to diagnose`]);
+ refreshMonitor('server',['CORE-SRV  //  NETWORK SERVICES',`DHCP ${s.dhcpRunning?'ONLINE':'STOPPED'}`,`DNS  ${s.dnsRunning?'ONLINE':'STOPPED'}`,`A clinic.ops.example → ${s.dnsA}`,`Service mgmt  >`]);
+ refreshMonitor('switch',['ACCESS-SW  //  24 PORT','Gi0/1  '+(s.uplink?'UP / 1000':'DOWN / ---'),`Gi0/6  VLAN ${s.guestVlan}`,'CLINIC VLAN 10 / GUEST 30','Show vlan to inspect']);
+ refreshMonitor('router',['EDGE-RTR  //  ROUTING',`0/0   via ${s.defaultRoute}`,`GUEST → CLINIC ${st.guestCanReach?'OPEN':'DENIED'}`,`BACKUP ${st.remoteRouteOK?'UP':'DOWN'}`,'Show routes to inspect']);
+ updateMission();
+ try {localStorage.setItem(simStorageKey,JSON.stringify(sim.serialize()));}catch(_){/* local file storage may be denied */}
+}
+function openModal(id){
+ if(activeModal)closeModal();
+ activeModal=id;
+ document.exitPointerLock?.();
+ $(id).classList.remove('hidden');
+ $('interaction').classList.remove('active');
+ if(id==='guide'){hintReveal=0;$('guide-hint-copy').classList.add('hidden');}
+ if(id==='map-overlay')updateMap();
+}
+function closeModal(){if(!activeModal)return;$(activeModal).classList.add('hidden');activeModal=null;}
+function openStation(host){
+ activeStation=host;
+ openModal('desktop');
+ const info=stationInfo[host];
+ $('station-label').textContent=info.name+' / '+info.title;
+ $('station-sub').textContent=info.desc;
+ $('terminal-head-text').textContent=info.name+'   /   SESSION ACTIVE  /  help · diagnostics · change · verify';
+ $('prompt').textContent=host==='client'?'C:\\>':host==='server'?'srv#':host==='switch'?'sw#':'rtr#';
+ $('quick-commands').innerHTML='';
+ info.tips.forEach(cmd=>{const b=document.createElement('button');b.className='quickcmd';b.textContent='› '+cmd;b.addEventListener('click',()=>runCommand(host,cmd));$('quick-commands').append(b)});
+ if(!terminalHistory[host].length){terminalHistory[host].push(`SIGNAL//ZERO TRAINING SHELL   /   ${info.name}`,'────────────────────────────────────────','Type help for supported commands. This is a simulated machine.',info.desc,'');}
+ renderTerminal();activateTab('terminal');
+ if(!touchDevice)requestAnimationFrame(()=>$('cmd').focus());
+}
+function renderTerminal(){const out=$('terminalout');out.textContent=terminalHistory[activeStation].join('\n');out.scrollTop=out.scrollHeight;}
+function runCommand(host,cmd){
+ if(!cmd.trim())return;
+ submittedCommands[host].push(cmd);if(submittedCommands[host].length>35)submittedCommands[host].shift();
+ historyIndex=submittedCommands[host].length;
+ terminalHistory[host].push('');terminalHistory[host].push((host==='client'?'C:\\>':host==='server'?'srv# ':host==='switch'?'sw# ':'rtr# ')+cmd);
+ const result=sim.command(host,cmd);
+ if(result.clear)terminalHistory[host]=[];
+ else terminalHistory[host].push(...result.lines);
+ if(terminalHistory[host].length>180)terminalHistory[host]=terminalHistory[host].slice(-180);
+ renderTerminal();
+ afterAction(result);
+}
+function radio(text,from='DISPATCH / INTERNAL RADIO'){
+  $('radio-speaker').textContent=from;$('radio-content').textContent=text;
+  $('radio-message').classList.add('active');
+  clearTimeout(radioTimer);radioTimer=setTimeout(()=>$('radio-message').classList.remove('active'),9200);
+}
+function afterAction(result){
+ if(result.changed||result.wins?.length){refreshWorld();}
+ if(result.wins?.length)for(const win of result.wins){milestone(win)}
+ else if(result.changed){playTone(360,.085,'sine',.035)}
+}
+function milestone(win){
+ const broadcasts=[
+ 'Carrier restored. Client workstations still have no valid network lease. Get into the services console.',
+ 'Addresses are working. Clinic staff report that the name still goes to the wrong system.',
+ 'Clinic HTTPS endpoint responding. Access bulkhead to Sector B released; security just flagged a guest-device probe.',
+ 'Unauthorized access blocked. The backup array in Sector B still cannot reach the upstream site.',
+ 'Remote backup is answering HTTPS again. You have brought all five systems online.'
+ ];
+ radio(broadcasts[win.index],win.nextStage===5?'CITY CONTROL / FINAL REPORT':'CITY CONTROL / SHIFT LEAD');
+ if(activeModal==='desktop'||activeModal==='patch'){setTimeout(()=>{if(activeModal==='desktop'||activeModal==='patch')closeModal()},1450)}
+
+ const text=win.nextStage>=5?'ALL DISTRICTS ONLINE':window.SignalZeroLevels[Math.min(win.nextStage,4)].title;
+ $('toast-title').textContent=win.nextStage>=5?'CITY RECOVERED':win.title+' — FIXED';
+ $('toast-sub').textContent=win.nextStage>=5?'Five connected network incidents cleared. All services restored.':'Now reporting: '+text+'. Follow the changing city alerts.';
+ $('progress-toast').classList.add('active');
+ clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('progress-toast').classList.remove('active'),4200);
+ playTone(555,.14,'sine',.055);setTimeout(()=>playTone(740,.19,'triangle',.045),130);
+}
+function activateTab(tab){
+ document.querySelectorAll('#desktop-tabs .tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+ for(const a of ['terminal','topology','manual'])$(a+'-pane').classList.toggle('hidden',a!==tab);
+ if(tab==='topology')updateMap();if(tab==='terminal'&&!touchDevice)$('cmd').focus();
+}
+function showHint(target){
+ const lv=window.SignalZeroLevels[Math.min(sim.stage,4)];
+ const el=$(target);hintReveal=Math.min(2,hintReveal+1);
+ sim.s.hintsUsed++; if(!sim.done)sim.s.score=Math.max(0,sim.s.score-35);
+ el.textContent=sim.done?'All five incidents cleared. Try resetting and solving without hints.':lv.hint[hintReveal-1];
+ el.classList.remove('hidden');refreshWorld();
+}
+function openPatch(){openModal('patch');selectedPorts=[];refreshPortButtons();$('patch-output').textContent='Choose one socket on each device.';}
+function refreshPortButtons(){document.querySelectorAll('.port').forEach(b=>{b.classList.toggle('selected',selectedPorts.includes(b.dataset.port));b.classList.toggle('connected',sim.s.uplink&&['gw-lan1','sw-uplink'].includes(b.dataset.port))});}
+function doPatch(){if(selectedPorts.length!==2){$('patch-output').textContent='Select exactly two labeled endpoints.';return;}const r=sim.patch(selectedPorts[0],selectedPorts[1]);$('patch-output').textContent=r.lines.join(' ');selectedPorts=[];refreshPortButtons();afterAction(r);}
+function soundContext(){try{if(!window.__szAudio)window.__szAudio=new(window.AudioContext||window.webkitAudioContext)();return window.__szAudio;}catch(_){return null}}
+function playTone(hz,duration,type='sine',vol=.035){const ctx=soundContext();if(!ctx)return;try{ctx.resume();const o=ctx.createOscillator();const g=ctx.createGain();o.type=type;o.frequency.setValueAtTime(hz,ctx.currentTime);g.gain.setValueAtTime(vol,ctx.currentTime);g.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+duration);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+duration+.01)}catch(_){/* unavailable audio */}}
+function startRun(resume){
+ sim=resume&&savedRun?new window.SignalZeroSim(savedRun):new window.SignalZeroSim();
+ if(!resume)try{localStorage.removeItem(simStorageKey)}catch(_){}
+ gameStarted=true;$('start').classList.add('hidden');
+ player.x=0;player.z=5.5;yaw=0;pitch=-.08;
+ refreshWorld();radio('Operator online. Emergency traffic is down. Locate Rack C and inspect the gateway-to-switch uplink.');playTone(440,.16,'triangle',.04);
+ if(!touchDevice)renderer.domElement.requestPointerLock?.();
+}
+function nearestStation(){
+ let choice=null,best=1000;
+ const fx=-Math.sin(yaw),fz=-Math.cos(yaw);
+ for(const s of stations){
+  const dx=s.x-player.x,dz=s.z-player.z;const dist=Math.hypot(dx,dz);
+  const angle=(dx*fx+dz*fz)/Math.max(.01,dist);
+  const maxD=touchDevice?3.65:3.25;
+  if(dist<=maxD&&(angle>.08||dist<1.65)&&dist<best){choice=s;best=dist;}
+ }
+ return choice;
+}
+function interact(){if(!gameStarted||activeModal)return;const t=nearestStation();if(!t){playTone(180,.13,'sine',.015);return;}playTone(470,.07,'triangle',.04);if(t.id==='patch')openPatch();else if(t.id==='map')openModal('map-overlay');else openStation(t.id);}
+function setCameraRotation(){camera.rotation.order='YXZ';camera.rotation.y=yaw;camera.rotation.x=pitch;}
+function look(dx,dy){yaw-=dx*.00215;pitch=Math.max(-1.12,Math.min(1.18,pitch-dy*.00205));setCameraRotation();}
+function move(dt){
+ if(!gameStarted||activeModal)return;
+ let side=(keyHeld.d||keyHeld.arrowright?1:0)-(keyHeld.a||keyHeld.arrowleft?1:0)+virtualX;
+ let forward=(keyHeld.w||keyHeld.arrowup?1:0)-(keyHeld.s||keyHeld.arrowdown?1:0)-virtualY;
+ if(!side&&!forward)return;
+ const len=Math.hypot(side,forward);if(len>1){side/=len;forward/=len;}
+ const speed=(keyHeld.shift?5:3.35)*dt;
+ const moveX=(side*Math.cos(yaw)-forward*Math.sin(yaw))*speed;
+ const moveZ=(-side*Math.sin(yaw)-forward*Math.cos(yaw))*speed;
+ let nx=Math.max(-9.1,Math.min(9.1,player.x+moveX));
+ const gateOpen=sim.stage>=3;
+ let nz=Math.max(gateOpen&&nx>6.82 ? -13.75:-6.18,Math.min(7.2,player.z+moveZ));
+ if(nz < -7.6) nx=Math.max(6.82,Math.min(9.12,nx));
+ // Coarse obstacle collision: stand close enough to a console to interact, never walk through it.
+ const blocks=[...stations.filter(s=>s.id!=='map').map(s=>({x:s.x,z:s.z,r:1.0})),{x:0,z:1.45,r:1.34}];
+ for(const b of blocks){const dd=Math.hypot(nx-b.x,nz-b.z);if(dd<b.r){const v=Math.max(dd,.0001);nx=b.x+(nx-b.x)/v*b.r;nz=b.z+(nz-b.z)/v*b.r;}}
+ player.x=nx;player.z=nz;
+}
+function updateInteraction(){
+ const near=nearestStation();const el=$('interaction');const show=!!near&&!activeModal&&gameStarted;
+ el.classList.toggle('active',show);if(show){$('interact-label').textContent=near.display;$('interaction').querySelector('small').innerHTML=`<kbd>${touchDevice?'USE':'E'}</kbd> ${near.id==='patch'?'REWIRE PATCH PANEL':near.id==='map'?'INSPECT NETWORK MAP':'ACCESS MACHINE / TERMINAL'}`;}
+}
+function gameFrame(){
+ const dt=Math.min(timer.getDelta(),.05);const tm=timer.elapsedTime;
+ move(dt);camera.position.set(player.x,player.y+(!activeModal&&(keyHeld.w||keyHeld.a||keyHeld.s||keyHeld.d)?Math.sin(tm*9)*.018:0),player.z);setCameraRotation();
+ if(dynamic.ring)dynamic.ring.rotation.z=tm*.13;
+ if(dynamic.door){const target=dynamic.door.userData.open?9.8:8.1;dynamic.door.position.x+=(target-dynamic.door.position.x)*Math.min(1,dt*2.5);}
+ dynamic.holoNodes.forEach((o,i)=>{o.position.y=1.6+Math.sin(tm*1.7+i)*.07;o.material.emissiveIntensity=.45+.35*Math.sin(tm*2+i)});
+ if(gameStarted)updateInteraction();
+ renderer.render(scene,camera);
+}
+renderer.setAnimationLoop(gameFrame);
+refreshWorld();
+window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio||1,touchDevice?1.4:1.8))});
+window.addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&activeModal){e.preventDefault();closeModal();return;}
+ if(e.target?.tagName==='INPUT'){
+   if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+     e.preventDefault();const list=submittedCommands[activeStation];if(!list?.length)return;
+     historyIndex=Math.max(0,Math.min(list.length,historyIndex+(e.key==='ArrowUp'?-1:1)));
+     $('cmd').value=list[historyIndex]||'';
+   }
+   return;
+ }
+ const k=e.key.toLowerCase();keyHeld[k]=true;
+ if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();
+ if(!gameStarted||activeModal)return;
+ if(k==='e'){e.preventDefault();interact()}
+ if(k==='m'){e.preventDefault();openModal('map-overlay')}
+ if(k==='h'){e.preventDefault();openModal('guide')}
+});
+window.addEventListener('keyup',e=>keyHeld[e.key.toLowerCase()]=false);
+window.addEventListener('blur',()=>{for(const k of Object.keys(keyHeld))keyHeld[k]=false});
+renderer.domElement.addEventListener('click',()=>{if(!touchDevice&&gameStarted&&!activeModal&&document.pointerLockElement!==renderer.domElement)renderer.domElement.requestPointerLock?.()});
+document.addEventListener('mousemove',e=>{if(document.pointerLockElement===renderer.domElement&&gameStarted&&!activeModal)look(e.movementX,e.movementY)});
+// Right-side touch swipe controls camera. Left-side joystick controls movement.
+let touchLookId=null,lastTouch={x:0,y:0};
+renderer.domElement.addEventListener('pointerdown',e=>{if(!touchDevice||!gameStarted||activeModal||e.clientX<window.innerWidth*.40)return;touchLookId=e.pointerId;lastTouch={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId)});
+renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==touchLookId)return;const dx=e.clientX-lastTouch.x,dy=e.clientY-lastTouch.y;look(dx*1.25,dy*1.25);lastTouch={x:e.clientX,y:e.clientY}});
+renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId===touchLookId)touchLookId=null});
+renderer.domElement.addEventListener('pointercancel',e=>{if(e.pointerId===touchLookId)touchLookId=null});
+const stick=$('stick'),knob=$('stick-knob');let stickPointer=null;
+function changeStick(e){const r=stick.getBoundingClientRect();let x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2);const m=Math.hypot(x,y),max=40;if(m>max){x=x/m*max;y=y/m*max}virtualX=x/max;virtualY=y/max;knob.style.transform=`translate(${x}px,${y}px)`}
+stick.addEventListener('pointerdown',e=>{stickPointer=e.pointerId;stick.setPointerCapture(e.pointerId);changeStick(e)});
+stick.addEventListener('pointermove',e=>{if(e.pointerId===stickPointer)changeStick(e)});
+for(const event of ['pointerup','pointercancel'])stick.addEventListener(event,e=>{if(e.pointerId===stickPointer){stickPointer=null;virtualX=0;virtualY=0;knob.style.transform='translate(0,0)'}});
+$('touch-use').addEventListener('click',interact);$('touch-map').addEventListener('click',()=>openModal('map-overlay'));
+$('start-new').addEventListener('click',()=>startRun(false));$('start-resume').addEventListener('click',()=>startRun(true));
+$('open-guide').addEventListener('click',()=>{if(activeModal==='guide')closeModal();else openModal('guide')});
+$('open-map').addEventListener('click',()=>{if(activeModal==='map-overlay')closeModal();else openModal('map-overlay')});
+$('close-desktop').addEventListener('click',closeModal);$('close-patch').addEventListener('click',closeModal);$('close-guide').addEventListener('click',closeModal);$('close-map').addEventListener('click',closeModal);
+$('desktop-tabs').addEventListener('click',e=>{const tab=e.target.closest('[data-tab]');if(tab)activateTab(tab.dataset.tab)});
+$('command-form').addEventListener('submit',e=>{e.preventDefault();const cmd=$('cmd').value.trim();$('cmd').value='';if(cmd)runCommand(activeStation,cmd);if(!touchDevice)$('cmd').focus()});
+$('patch').addEventListener('click',e=>{const p=e.target.closest('[data-port]');if(!p)return;const id=p.dataset.port;if(selectedPorts.includes(id))selectedPorts=selectedPorts.filter(x=>x!==id);else if(selectedPorts.length<2)selectedPorts.push(id);else selectedPorts=[id];refreshPortButtons();});
+$('patch-submit').addEventListener('click',doPatch);
+$('patch-unplug').addEventListener('click',()=>{const r=sim.unpatch();$('patch-output').textContent=r.lines.join(' ');refreshPortButtons();afterAction(r)});
+$('open-local-hint').addEventListener('click',()=>showHint('hint-text'));
+$('guide-hint').addEventListener('click',()=>showHint('guide-hint-copy'));
+$('guide-restart').addEventListener('click',()=>{if(!confirm('Reset every incident and start a new shift?'))return;closeModal();startRun(false)});
+// Deterministic public test interface, optional. Does not give player progress for opening devtools.
+window.__SIGNAL_ZERO_TEST__={
+ snapshot:()=>sim.serialize(),status:()=>sim.status,
+ command:(host,cmd)=>{const r=sim.command(host,cmd);afterAction(r);return r},
+ patch:(a,b)=>{const r=sim.patch(a,b);afterAction(r);return r},
+ getStage:()=>sim.stage, getDevicePositions:()=>stations.map(x=>({...x})),
+ setPosition:(x,z)=>{player.x=x;player.z=z},
+ openStation,refreshWorld,
+ version:'0.2-threejs'
+};
+console.log('%cSIGNAL//ZERO v0.2: first-person network game ready','color:#7bffdb;font-weight:bold');
+
+} catch (error) {
+  console.error('SIGNAL//ZERO failed to initialize', error);
+  document.querySelector('#load-error').classList.remove('hidden');
+  document.querySelector('#error-text').textContent = String(error?.message || error);
+}
+</script>
+</body>
+</html>
