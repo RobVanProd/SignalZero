@@ -37,9 +37,11 @@ Design rules carried over from the v0.2 plan:
 The world is drawn as an ink illustration printed in a few flat inks, and **only live signal glows**: link LEDs, packets, screens, and the windows of districts whose services work. Fixing the network puts the light back. Every glow means something, so state can be read from the scene. Outlines come from the depth buffer, tones are halftoned between five ink bands, and the UI is set as printed work orders in condensed civic type. Rules and implementation: [`docs/ART_DIRECTION.md`](docs/ART_DIRECTION.md).
 
 ![Title](docs/screenshots/title.jpg)
-![Racks with the HUD](docs/screenshots/racks.jpg)
+![Operations centre with the HUD](docs/screenshots/noc.jpg)
 ![Console](docs/screenshots/console.jpg)
 ![Debrief](docs/screenshots/debrief.jpg)
+![Unguided challenge closed](docs/screenshots/ticket-closed.jpg)
+![Phone layout (low tier)](docs/screenshots/mobile.jpg)
 
 ## How it is built
 

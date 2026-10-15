@@ -28,11 +28,12 @@ Date: 15 October 2026. The v0.2 QA document is preserved in [`prototype/v0.2/QA_
 
 `npm run test:browser` — Chromium with SwiftShader WebGL 2 (software rendering, not a GPU):
 
-- Title, briefing, campaign start, M01 solved through the patch-panel UI and a console command, debrief, M02 start, packet-capture view, map/IPAM window, NOC render, mobile viewport with touch controls and console; asserts no uncaught page errors. Screenshots in `tests/browser/out/`.
+- 14 steps, all passing on commit 3d963d1: title, briefing, M01 solved through the patch-panel UI and a console command, debrief shown and the win recorded exactly once (regression for a double-debrief bug), M02 start, packet-capture view, map/IPAM window, NOC render, a Night Shift challenge (seed 27, DNS service down) fixed from the consoles and closed exactly once, mobile viewport with touch controls and console; no uncaught page errors in any of the three pages. Screenshots in `tests/browser/out/` (a selection in `docs/screenshots/`).
 
 ## Not verified (say so plainly)
 
-- **Real GPUs and phones.** Frame rate, thermal behaviour, Safari/iOS WebGL quirks and Android GPU paths are unmeasured. SwiftShader proves the shaders compile and the scene renders, not that it is fast.
+- **Real GPUs and phones.** Frame rate, thermal behaviour, Safari/iOS WebGL quirks and Android GPU paths are unmeasured. SwiftShader proves the shaders compile and the scene renders, not that it is fast. The Night Ink ink pass runs on every tier (9 depth taps + 1 colour tap per pixel).
+- **The art style's effect on play.** Whether "only signal glows" helps players read faults, and whether the halftone screen causes fatigue over 45 minutes, is untested. Add to the playtest: ask each player what the glowing things meant, and log any complaint about the dots.
 - **Learning.** No learner has played v0.3. There is no evidence yet of enjoyment, retention or transfer.
 - **Output fidelity.** Device outputs imitate real formats from documentation and experience, not from captured traffic or recorded sessions. An independent review pass was run (findings and fixes are listed in the PR description); a recorded comparison against real IOS/Windows/Ubuntu sessions has not been done.
 - **Network model vs a reference implementation.** The v0.2 plan's differential test against Linux namespaces or an emulator is still open.
@@ -61,4 +62,5 @@ Run the 10-player session above on v0.3 as built, with the thresholds fixed in a
 - Mobile is playable but dense; the console sidebar is hidden behind a "Goals" toggle on narrow screens.
 - Typing-heavy play on touch devices is slow; quick-command chips mitigate but do not solve it.
 - Time-dependent mechanics (30 s STP convergence, 5-minute APIPA retries, camera T1 renewals) are realistic but can read as "nothing happened". The `T` fast-forward exists for this; watch whether players find it.
-- Visual quality was tuned against software-rendered screenshots; tone mapping and bloom should be rechecked on a real GPU and an OLED phone.
+- Visual quality was tuned against software-rendered screenshots; the ink thresholds, halftone cell size and bloom should be rechecked on a real GPU and an OLED phone.
+- The map's internet cluster (BACKUP/PORTAL/RESOLVER/SIP-GW) draws overlapping nodes.
