@@ -144,10 +144,11 @@ export function buildDistrict(params = DEFAULT_PARAMS) {
   const isp = add(device('ISP-PE', 'router', 'isp', { managed: false, model: 'Provider edge', map: { x: 90, y: 90 }, role: 'Internet service provider edge', zone: 'offsite' }));
   addPort(isp, 'Gi0/0', { ip: { addr: ip(p.wan.peer), len: p.wan.len } });
   addPort(isp, 'Gi0/1', { ip: { addr: ip('203.0.113.1'), len: 24 } });
-  const inet = add(device('INTERNET', 'bridge', 'none', { managed: false, map: { x: 40, y: 200 }, zone: 'offsite' }));
+  const inet = add(device('INTERNET', 'bridge', 'none', { managed: false, map: { x: 90, y: 230 }, zone: 'offsite' }));
   for (let i = 1; i <= 6; i++) addPort(inet, `p${i}`);
+  const inetPos = { BACKUP: { x: 40, y: 330 }, PORTAL: { x: 120, y: 360 }, RESOLVER: { x: 40, y: 420 }, 'SIP-GW': { x: 120, y: 450 } };
   const inetHost = (id, addr, services, role) => {
-    const d = add(device(id, 'host', 'linux', { managed: false, ipcfg: { dhcp: false, static: { addr: ip(addr), len: 24, gw: ip('203.0.113.1'), dns: [] } }, services, role, zone: 'offsite' }));
+    const d = add(device(id, 'host', 'linux', { managed: false, ipcfg: { dhcp: false, static: { addr: ip(addr), len: 24, gw: ip('203.0.113.1'), dns: [] } }, services, role, zone: 'offsite', map: inetPos[id] }));
     addPort(d, 'eth0');
     return d;
   };

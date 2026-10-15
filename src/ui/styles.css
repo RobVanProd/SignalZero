@@ -1,0 +1,2 @@
+html,body{margin:0;height:100%;overflow:hidden;background:#03070b;color:#e6f3f8;font-family:"Segoe UI",Inter,system-ui,sans-serif}
+#view{position:fixed;inset:0}#view canvas{display:block;width:100%;height:100%}
