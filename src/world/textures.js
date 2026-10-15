@@ -45,27 +45,24 @@ export function floorTextures() {
   const x = c.getContext('2d');
   const r = canvas(S, S);
   const rx = r.getContext('2d');
+  // Night Ink: flat printed tiles (no photographic speckle), inked seams, a few hatched tiles for texture.
   for (let i = 0; i < 4; i++) {
     for (let j = 0; j < 4; j++) {
-      const v = 18 + Math.floor(rnd() * 7);
-      x.fillStyle = `rgb(${v},${v + 4},${v + 9})`;
+      const v = 84 + Math.floor(rnd() * 10);
+      x.fillStyle = `rgb(${v},${v + 4},${v + 26})`;
       x.fillRect(i * T, j * T, T, T);
-      const g = x.createLinearGradient(i * T, j * T, i * T + T, j * T + T);
-      g.addColorStop(0, 'rgba(255,255,255,0.025)');
-      g.addColorStop(1, 'rgba(0,0,0,0.05)');
-      x.fillStyle = g;
-      x.fillRect(i * T, j * T, T, T);
-      speckle(x, S, S, 0, 0, rnd);
+      if (rnd() < 0.3) {
+        x.strokeStyle = 'rgba(16,20,46,0.22)';
+        x.lineWidth = 2;
+        for (let k = -T; k < T; k += 14) { x.beginPath(); x.moveTo(i * T + k, j * T + T); x.lineTo(i * T + k + T, j * T); x.stroke(); }
+      }
       const rv = 70 + Math.floor(rnd() * 40);
       rx.fillStyle = `rgb(${rv},${rv},${rv})`;
       rx.fillRect(i * T, j * T, T, T);
     }
   }
-  speckle(x, S, S, 9000, 0.05, rnd);
-  speckle(rx, S, S, 12000, 0.25, rnd);
-  // seams
-  x.strokeStyle = 'rgba(0,0,0,0.85)';
-  x.lineWidth = 6;
+  x.strokeStyle = 'rgb(16,20,46)';
+  x.lineWidth = 7;
   rx.strokeStyle = 'rgb(230,230,230)';
   rx.lineWidth = 8;
   for (let i = 0; i <= 4; i++) {
@@ -73,12 +70,6 @@ export function floorTextures() {
       ctx.beginPath(); ctx.moveTo(i * T, 0); ctx.lineTo(i * T, S); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, i * T); ctx.lineTo(S, i * T); ctx.stroke();
     }
-  }
-  x.strokeStyle = 'rgba(120,170,190,0.06)';
-  x.lineWidth = 2;
-  for (let i = 0; i <= 4; i++) {
-    x.beginPath(); x.moveTo(i * T + 4, 0); x.lineTo(i * T + 4, S); x.stroke();
-    x.beginPath(); x.moveTo(0, i * T + 4); x.lineTo(S, i * T + 4); x.stroke();
   }
   return { map: tex(c, { repeat: [1, 1] }), rough: tex(r, { srgb: false, repeat: [1, 1] }) };
 }
@@ -395,7 +386,7 @@ export function genericFace(label, sub = '', color = '#1f252d', leds = 8) {
 }
 
 /** Text label texture (signage). */
-export function labelTexture(text, { w = 1024, h = 160, fg = '#d8f6ff', bg = 'rgba(6,14,20,0.92)', font = 'bold 64px "Segoe UI", sans-serif', align = 'center', border = null, sub = null } = {}) {
+export function labelTexture(text, { w = 1024, h = 160, fg = '#f0e6cf', bg = '#0b0f26', font = '800 64px "Big Shoulders Display", sans-serif', align = 'center', border = null, sub = null } = {}) {
   const c = canvas(w, h);
   const x = c.getContext('2d');
   if (bg) { x.fillStyle = bg; x.fillRect(0, 0, w, h); }
@@ -407,8 +398,8 @@ export function labelTexture(text, { w = 1024, h = 160, fg = '#d8f6ff', bg = 'rg
   const ax = align === 'center' ? w / 2 : align === 'left' ? 40 : w - 40;
   x.fillText(text, ax, sub ? h * 0.4 : h / 2);
   if (sub) {
-    x.font = `${Math.round(h * 0.2)}px "Segoe UI", sans-serif`;
-    x.fillStyle = 'rgba(160,200,215,0.85)';
+    x.font = `${Math.round(h * 0.2)}px "IBM Plex Mono", monospace`;
+    x.fillStyle = '#ffa53b';
     x.fillText(sub, ax, h * 0.75);
   }
   return tex(c);
@@ -438,19 +429,7 @@ export function buildingWindows(seed, cols = 8, rows = 24) {
   return tex(c);
 }
 
-export function radialGlow(color = '255,255,255', size = 256) {
-  const c = canvas(size, size);
-  const x = c.getContext('2d');
-  const g = x.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, `rgba(${color},1)`);
-  g.addColorStop(0.25, `rgba(${color},0.45)`);
-  g.addColorStop(1, `rgba(${color},0)`);
-  x.fillStyle = g;
-  x.fillRect(0, 0, size, size);
-  return tex(c);
-}
-
-export function verticalFade(top = 'rgba(80,220,255,0.0)', bottom = 'rgba(80,220,255,0.35)') {
+export function verticalFade(top = 'rgba(80,220,255,0.0)', bottom = '#ffa53b') {
   const c = canvas(8, 256);
   const x = c.getContext('2d');
   const g = x.createLinearGradient(0, 0, 0, 256);

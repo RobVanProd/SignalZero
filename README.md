@@ -32,6 +32,15 @@ Design rules carried over from the v0.2 plan:
 - **Fix, then verify.** An incident completes only after the player produces evidence from a user-facing test *after* the fix (e.g. `curl` from the affected PC).
 - **Several valid interventions with measurable trade-offs.** In the broadcast storm, Rapid PVST+, PVST+ and "shut a riser" all stop the storm; a scripted riser cut later measures the outage each choice causes (≈1–2 s, ≈30 s, or until a human reacts). In the rogue DHCP incident, shutting the port contains it; DHCP snooping prevents the repeat.
 
+## Look: "Night Ink"
+
+The world is drawn as an ink illustration printed in a few flat inks, and **only live signal glows**: link LEDs, packets, screens, and the windows of districts whose services work. Fixing the network puts the light back. Every glow means something, so state can be read from the scene. Outlines come from the depth buffer, tones are halftoned between five ink bands, and the UI is set as printed work orders in condensed civic type. Rules and implementation: [`docs/ART_DIRECTION.md`](docs/ART_DIRECTION.md).
+
+![Title](docs/screenshots/title.jpg)
+![Racks with the HUD](docs/screenshots/racks.jpg)
+![Console](docs/screenshots/console.jpg)
+![Debrief](docs/screenshots/debrief.jpg)
+
 ## How it is built
 
 ```
@@ -40,7 +49,8 @@ src/engine/     deterministic network engine (no DOM): L1 negotiation, 802.1Q, P
 src/cli/        device shells: Cisco IOS-style (modes, abbreviations, ?, Tab), Windows cmd, Ubuntu shell
 src/content/    the district topology, 10 missions, challenge generator + fault library, N10-009 map
 src/game/       campaign/challenge runtime, skill evidence, local playtest telemetry, app controller, audio
-src/world/      Three.js world: rooms, racks, cables routed through trays, packet particles, holo table, city
+src/world/      Three.js world: rooms, racks, cables routed through trays, packet particles, holo table, city;
+                Night Ink pipeline (style.js: toon materials, ink/halftone pass, print pass)
 src/ui/         HUD, consoles, nano editor, patch panel, packet capture, map/IPAM, menus
 tests/unit/     node:test suites (engine, parsers, CLI grammar, all missions, generator property tests)
 tests/browser/  end-to-end test in Chromium with real WebGL (SwiftShader), writes screenshots
@@ -55,8 +65,8 @@ npm run test:browser    # needs `npm run build` first; real WebGL via SwiftShade
 ## Honest status
 
 - Simulation, missions and generator: covered by automated tests (see [`docs/QA_AND_NEXT_ITERATION.md`](docs/QA_AND_NEXT_ITERATION.md)).
-- Rendering: exercised in headless Chromium with a software WebGL 2 implementation, not on real GPUs or phones. Frame rate on real devices is unmeasured.
+- Rendering: exercised in headless Chromium with a software WebGL 2 implementation, not on real GPUs or phones. Frame rate on real devices is unmeasured. Whether the art style helps or hinders reading the network over a full shift is untested.
 - Learning: **not yet tested with learners.** Nothing here shows that players enjoy it, learn from it, or transfer skills. The pre-registered playtest in the QA document is the next decision gate.
 - Scope: a subset of N10-009 ([`docs/CURRICULUM.md`](docs/CURRICULUM.md)). Not an exam-prep substitute.
 
-Unofficial. Not affiliated with or endorsed by CompTIA or Cisco. Network+ is a trademark of CompTIA. Addresses use RFC 1918 and documentation ranges (198.51.100.0/24, 203.0.113.0/24); domains use `.example`.
+Unofficial. Not affiliated with or endorsed by CompTIA or Cisco. Network+ is a trademark of CompTIA. Addresses use RFC 1918 and documentation ranges (198.51.100.0/24, 203.0.113.0/24); domains use `.example`. Third-party licences (three.js MIT; fonts SIL OFL 1.1): [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).

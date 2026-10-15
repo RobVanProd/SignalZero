@@ -1,6 +1,7 @@
 // Assembles the 3D operations centre and keeps it in sync with the network engine.
 import * as THREE from 'three';
-import { createRenderer, environment, setupPost, resize, render, QUALITY } from './renderer.js';
+import { createRenderer, setupPost, resize, render, QUALITY } from './renderer.js';
+import { toonify, INK } from './style.js';
 import { materials, Batcher } from './materials.js';
 import { buildRoom } from './room.js';
 import { buildRacks, buildDesk, buildHoloBase, buildVideoWall, buildLobby, buildSectorB, buildDemarc, LedBank, wallLabel } from './props.js';
@@ -8,7 +9,7 @@ import { Cables, Packets } from './cables.js';
 import { Holo } from './holo.js';
 import { City, DISTRICTS } from './city.js';
 import { Controls } from './controls.js';
-import { drawTerminal, drawDashboard, drawCctv, drawKiosk, drawPhone } from './screens.js';
+import { drawTerminal, drawDashboard, drawCctv, drawKiosk, drawPhone, SCR } from './screens.js';
 import { PLACES, STATIONS, RACK, ROOM, DOOR_B, SECTOR_B, CORRIDOR, LOBBY } from './layout.js';
 import { PATCH_PANEL } from '../content/district.js';
 import { stpRecord, carries } from '../engine/switching.js';
@@ -16,13 +17,15 @@ import { fmtIp } from '../engine/ipv4.js';
 import { wallClock } from '../engine/engine.js';
 import { hostAddr } from '../engine/routing.js';
 
+// LED inks (HDR so they clear the signal threshold): phosphor = healthy, sodium = attention, fault, data = traffic
+const ink = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
 const C = {
   off: new THREE.Color(0, 0, 0),
-  green: new THREE.Color(0.25, 1.6, 0.55),
-  amber: new THREE.Color(1.8, 1.0, 0.1),
-  red: new THREE.Color(2.0, 0.12, 0.2),
-  blue: new THREE.Color(0.25, 0.9, 2.0),
-  white: new THREE.Color(1.6, 1.8, 2.0),
+  green: ink(INK.phosphor, 1.7),
+  amber: ink(INK.sodium, 1.8),
+  red: ink(INK.fault, 2.0),
+  blue: ink(INK.data, 1.9),
+  white: ink(INK.paper, 1.8),
 };
 
 export class World {
@@ -31,11 +34,9 @@ export class World {
     this.q = this.ctx.q;
     const renderer = this.ctx.renderer;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x02060a);
-    this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.03, 3000);
+    this.scene.background = new THREE.Color(INK.night);
+    this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 3000);
     this.scene.add(this.camera);
-    this.scene.environment = environment(renderer);
-    this.scene.environmentIntensity = 0.55;
     this.t = 0;
     this.alarm = 0;
     const M = (this.M = materials());
@@ -100,6 +101,7 @@ export class World {
     this.doorOpen = 0;
     this.doorUnlocked = false;
 
+    this.toonCache = toonify(this.scene);
     setupPost(this.ctx, this.scene, this.camera);
     addEventListener('resize', () => resize(this.ctx, this.camera));
     this.raycaster = new THREE.Raycaster();
@@ -120,7 +122,7 @@ export class World {
   lights() {
     const s = this.scene;
     const tier0 = this.q.name;
-    s.add(new THREE.HemisphereLight(0x7fb0d0, 0x101820, tier0 === 'low' ? 1.3 : 0.9));
+    s.add(new THREE.HemisphereLight(0x8fa8e0, 0x2a3060, tier0 === 'low' ? 1.6 : 1.3));
     // wall washers: soft gradients so walls read as surfaces, not voids (each light costs per-pixel work,
     // so lower tiers get fewer)
     const tier = tier0;
@@ -225,7 +227,7 @@ export class World {
     // door to Sector B
     this.doorUnlocked = st.devices['DIST-SW-B'].powered !== false;
     this.doorBlock.active = !this.doorUnlocked;
-    this.room.doorLamp.material.emissive.setHex(this.doorUnlocked ? 0x37f59a : 0xff3d5e);
+    this.room.doorLamp.material.emissive.setHex(this.doorUnlocked ? INK.phosphor : INK.fault);
     this.rogue.visible = !!st.devices['ROGUE-AP'] && (!!st.links.rogue || !!st.links.rogue2);
     if (st.links.rogue2) this.rogue.position.set(11.35, 0.5, 7.2);
     else this.rogue.position.set(11.35, 0.5, 6.0);
@@ -292,7 +294,7 @@ export class World {
     const clock = `${String(w.hh).padStart(2, '0')}:${String(w.mm).padStart(2, '0')}:${String(w.ss).padStart(2, '0')}`;
     const term = (scr, dev, title, os) => {
       const lines = this.consoles[dev] || [`${title}`, '', 'idle — walk up and press E to use this console'];
-      drawTerminal(scr, title, lines, { os, status: eng.portUp(dev, st.devices[dev]?.nic || 'eth0') ? 'LINK' : 'NO LINK', statusColor: eng.portUp(dev, st.devices[dev]?.nic || 'eth0') ? '#37f59a' : '#ff3d5e' });
+      drawTerminal(scr, title, lines, { os, status: eng.portUp(dev, st.devices[dev]?.nic || 'eth0') ? 'LINK' : 'NO LINK', statusColor: eng.portUp(dev, st.devices[dev]?.nic || 'eth0') ? SCR.phos : SCR.fault });
     };
     term(this.dispatchScreens[0], 'DISPATCH-01', 'DISPATCH-01 · cmd', 'windows');
     drawDashboard(this.dispatchScreens[1], 'SERVICE HEALTH', flowRows, `District 04 · ${clock}`);
@@ -334,10 +336,10 @@ export class World {
     const back = this.cables.route(eng, repHops);
     const ok = probe.status === 'ok';
     const okKind = ok && !['net-unreachable', 'ttl-exceeded', 'rst', 'port-unreachable'].includes(probe.kind);
-    const replyColor = okKind ? 0x37f59a : 0xffb547;
+    const replyColor = okKind ? 0x3dffb4 : 0xffa53b;
     if (!segs.length) {
       const here = this.anchorOfDevice(eng, probe.fwd.at);
-      if (here) this.packets.burst(here, 0xff3d5e, 18);
+      if (here) this.packets.burst(here, 0xff3d5a, 18);
       return;
     }
     this.packets.spawn(segs, {
@@ -352,7 +354,7 @@ export class World {
   burstAtEnd(segs) {
     const s = segs[segs.length - 1];
     const p = s.curve.getPointAt(s.rev ? 0 : 1);
-    this.packets.burst(p, 0xff3d5e, 18);
+    this.packets.burst(p, 0xff3d5a, 18);
   }
 
   anchorOfDevice(eng, devId) {
@@ -407,14 +409,14 @@ export class World {
         this.flowTimers[f.id] = fs.ok ? 1.1 + Math.random() * 0.5 : 2.2;
         const segs = this.cables.route(this.eng, fs.links);
         if (!segs.length) continue;
-        const color = !fs.ok ? 0xff3d5e : fs.degraded ? 0xffb547 : f.kind === 'voice' ? 0x8a7dff : 0x45e6ff;
+        const color = !fs.ok ? 0xff3d5a : fs.degraded ? 0xffa53b : f.kind === 'voice' ? 0x8a7dff : 0x5cc8ff;
         this.packets.spawn(segs, { color, speed: 5.5, size: 0.045, trail: 3, then: fs.ok ? null : () => this.burstAtEnd(segs) });
       }
       if (this.stormLinks.size && Math.random() < dt * 40) {
         const ids = [...this.stormLinks];
         const id = ids[Math.floor(Math.random() * ids.length)];
         const l = this.cables.links.get(id);
-        if (l && l.curve) this.packets.spawn([{ curve: l.curve, length: l.length, rev: Math.random() > 0.5 }], { color: 0xff2a4a, speed: 14, size: 0.05, trail: 2 });
+        if (l && l.curve) this.packets.spawn([{ curve: l.curve, length: l.length, rev: Math.random() > 0.5 }], { color: 0xff3d5a, speed: 14, size: 0.05, trail: 2 });
       }
       // storm cables pulse
       for (const [, l] of this.cables.links) if (l.storm && l.mesh) l.mesh.material.emissiveIntensity = 0.8 + Math.abs(Math.sin(t * 13)) * 1.6;

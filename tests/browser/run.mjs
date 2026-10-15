@@ -30,12 +30,13 @@ async function page(viewport, query, extra = {}) {
   p.on('pageerror', e => errors.push(String(e.stack || e)));
   p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await p.goto(url + query);
-  await p.waitForFunction(() => window.__SZ__ && !document.getElementById('loading'), null, { timeout: 90000 });
+  await p.waitForFunction(() => window.__SZ__ && !document.getElementById('loading'), null, { timeout: 180000 });
   return { p, errors, ctx };
 }
 
 try {
-  const { p, errors } = await page({ width: 1366, height: 800 }, '?q=medium');
+  // SwiftShader renders on the CPU: close each page before opening the next so they do not compete.
+  const { p, errors, ctx: desk } = await page({ width: 1366, height: 800 }, '?q=medium');
   await step('real WebGL2 context (not a mock)', async () => {
     const info = await p.evaluate(() => { const gl = document.querySelector('#view canvas').getContext('webgl2'); return { ok: !!gl, three: !!window.__SZ__.app.world.ctx.renderer.capabilities.isWebGL2 }; });
     assert.ok(info.three, 'renderer is WebGL2');
@@ -99,6 +100,7 @@ try {
     await p.screenshot({ path: path.join(OUT, '08-noc.png') });
   });
   await step('no uncaught page errors (desktop)', async () => assert.deepEqual(errors, []));
+  await desk.close();
 
   const c = await page({ width: 1366, height: 800 }, '?q=low');
   await step('Night Shift challenge: ticket, unguided fix from the consoles, closed once', async () => {
@@ -124,6 +126,7 @@ try {
     await c.p.screenshot({ path: path.join(OUT, '13-ticket-closed.png') });
   });
   await step('no uncaught page errors (challenge)', async () => assert.deepEqual(c.errors, []));
+  await c.ctx.close();
 
   const m = await page({ width: 412, height: 860 }, '?q=low', { isMobile: true, hasTouch: true });
   await step('mobile: title, campaign, touch controls, console', async () => {

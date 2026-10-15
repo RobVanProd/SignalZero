@@ -47,7 +47,7 @@ function hitbox(group, w, h, d, pos, station) {
 }
 
 function facePlane(map, emissive, w, h) {
-  const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.5, metalness: 0.4, emissiveMap: emissive || null, emissive: emissive ? 0xffffff : 0x000000, emissiveIntensity: emissive ? 2.2 : 0 });
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.5, metalness: 0.4, emissiveMap: emissive || null, emissive: emissive ? 0xffffff : 0x000000, emissiveIntensity: emissive ? 0.55 : 0 });
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
 }
 
@@ -72,7 +72,7 @@ export function buildRacks(root, M, B, leds, hits) {
     // cable manager fingers on the right side
     for (let y = 0.25; y < RACK.h - 0.2; y += 0.09) B.box(0.05, 0.02, 0.05, RACK.frontX + 0.02, y, z - 0.32, M.plastic);
     // top label + glow strip
-    const lab = sign(r.title, { w: 512, h: 128, font: '700 60px "Segoe UI", sans-serif', fg: '#e6fbff', bg: 'rgba(6,16,22,0.95)', sub: r.sub }, 0.5, 0.125);
+    const lab = sign(r.title, { w: 512, h: 128, font: '800 60px "Big Shoulders Display", sans-serif', fg: '#f0e6cf', bg: '#0b0f26', sub: r.sub }, 0.5, 0.125);
     lab.position.set(RACK.frontX + 0.03, RACK.h - 0.14, z);
     lab.rotation.y = Math.PI / 2;
     root.add(lab);
@@ -265,7 +265,7 @@ export function buildVideoWall(root, M, B) {
   const h = 1.07;
   for (let i = 0; i < cols; i++) {
     for (let j = 0; j < rows; j++) {
-      const s = new Screen(1024, 576, { brightness: 0.85 });
+      const s = new Screen(1024, 576, { brightness: 1.6 });
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.02, h - 0.02), s.material);
       const z = (i - (cols - 1) / 2) * w;
       m.position.set(x - 0.075, 1.35 + j * h + h / 2, z);
@@ -313,7 +313,7 @@ export function buildLobby(root, M, B, leds, hits, anchors) {
   // warm slatted feature wall + welcome sign
   for (let i = 0; i < 26; i++) B.box(0.12, 3.0, 0.05, 4.4 + i * 0.29, 1.6, ROOM.z1 - 0.16, M.wood);
   B.box(7.6, 0.02, 0.04, 8.2, 0.12, ROOM.z1 - 0.2, M.stripAmber);
-  const welcome = sign('WELCOME  ·  GUEST WI-FI: CityClinic-Guest', { w: 2048, h: 160, font: '600 70px "Segoe UI", sans-serif', fg: '#ffe7c8', bg: null }, 4.8, 0.38);
+  const welcome = sign('WELCOME  ·  GUEST WI-FI: CityClinic-Guest', { w: 2048, h: 160, font: '800 70px "Big Shoulders Display", sans-serif', fg: '#f0e6cf', bg: null }, 4.8, 0.38);
   welcome.position.set(8.2, 2.7, ROOM.z1 - 0.2);
   welcome.rotation.y = Math.PI;
   root.add(welcome);
@@ -380,7 +380,7 @@ export function buildSectorB(root, M, B, leds, hits, anchors) {
     anchors[`DIST-SW-B|${p.name}`] = { p: pos.clone().add(V(0, -0.006, 0)), out: [0, 0, 1] };
     if (p.name !== 'Con0') leds.add(pos.clone().add(V(-0.007, 0.003, 0.002)), `DIST-SW-B|${p.name}`);
   }
-  const lab = sign('SECTOR B · IDF-1', { w: 512, h: 96, font: '700 46px "Segoe UI", sans-serif', fg: '#e6fbff', bg: 'rgba(6,16,22,0.95)' }, 0.5, 0.09);
+  const lab = sign('SECTOR B · IDF-1', { w: 512, h: 96, font: '800 46px "Big Shoulders Display", sans-serif', fg: '#f0e6cf', bg: '#0b0f26' }, 0.5, 0.09);
   lab.position.set(wr.x, 1.88, wr.z + 0.255);
   root.add(lab);
   hits.push(hitbox(root, 0.7, 0.8, 0.5, V(wr.x, 1.45, wr.z + 0.25), 'DIST-SW-B'));
@@ -424,7 +424,7 @@ export function buildSectorB(root, M, B, leds, hits, anchors) {
   hits.push(hitbox(root, 0.8, 0.6, 0.6, V(st.x, 0.95, st.z), 'STAFF-LAPTOP'));
   chair(B, M, st.x, st.z + 0.75, 0);
   // CCTV wall
-  const cctv = new Screen(1600, 860, { brightness: 0.8 });
+  const cctv = new Screen(1600, 860, { brightness: 1.5 });
   const cm = new THREE.Mesh(new THREE.PlaneGeometry(4.0, 2.15), cctv.material);
   cm.position.set(SECTOR_B.x1 - 0.16, 1.85, -6.5);
   cm.rotation.y = -Math.PI / 2;
@@ -455,7 +455,7 @@ export function buildSectorB(root, M, B, leds, hits, anchors) {
 export function buildDemarc(root, M, B, anchors) {
   const p = PLACES.DEMARC.pos;
   B.box(0.08, 0.5, 0.4, p[0], p[1], p[2], M.plasticLight);
-  const lab = sign('ISP DEMARC', { w: 512, h: 128, font: 'bold 60px "Segoe UI", sans-serif', fg: '#20262d', bg: '#ffd166', sub: 'CIRCUIT DC-44817' }, 0.36, 0.09);
+  const lab = sign('ISP DEMARC', { w: 512, h: 128, font: '800 60px "Big Shoulders Display", sans-serif', fg: '#20262d', bg: '#ffa53b', sub: 'CIRCUIT DC-44817' }, 0.36, 0.09);
   lab.position.set(p[0] + 0.045, p[1] + 0.12, p[2]);
   lab.rotation.y = Math.PI / 2;
   root.add(lab);
@@ -464,7 +464,7 @@ export function buildDemarc(root, M, B, anchors) {
 }
 
 export function wallLabel(root, text, pos, rotY, w = 1.4) {
-  const s = sign(text, { w: 1024, h: 140, font: '600 60px "Segoe UI", sans-serif', fg: '#c8f7ff', bg: 'rgba(5,12,18,0.85)' }, w, w * 0.137);
+  const s = sign(text, { w: 1024, h: 140, font: '800 60px "Big Shoulders Display", sans-serif', fg: '#f0e6cf', bg: '#0b0f26' }, w, w * 0.137);
   s.position.copy(pos);
   s.rotation.y = rotY;
   root.add(s);

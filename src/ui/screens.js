@@ -33,7 +33,7 @@ export function briefing(app, m, onGo) {
   const card = h('div', { class: 'card glass', role: 'dialog' },
     h('div', { class: 'hd' }, h('div', { class: 'eyebrow' }, `${ACTS[m.act].title} · INCIDENT ${m.id.slice(1)} · ${m.code}`), h('h2', {}, m.title)),
     h('div', { class: 'bd' },
-      h('p', { style: { fontSize: '15px', color: '#dbeaf0' } }, m.brief),
+      h('p', { class: 'brief' }, m.brief),
       h('h4', {}, 'Your task'), h('p', {}, m.task),
       h('h4', {}, 'How you win'), h('ul', { class: 'clean' }, m.goals.map(g => h('li', {}, g.label)), (m.constraints || []).map(c => h('li', { class: 'muted' }, `Without breaking: ${c.label}`))),
       h('p', { class: 'muted', style: { fontSize: '12.5px' } }, 'The simulator checks real behaviour (does traffic actually flow?), not a specific command. Any correct fix works. After the fix you must verify it from where users are.'),
@@ -48,7 +48,7 @@ export function debrief(app, m, res, { onNext, onReplay, last }) {
   const d = m.debrief;
   const outcome = r.outcome;
   const card = h('div', { class: 'card glass', role: 'dialog', style: { width: 'min(860px,96vw)' } },
-    h('div', { class: 'hd' }, h('div', { class: 'eyebrow', style: { color: 'var(--green)' } }, `INCIDENT ${m.id.slice(1)} RESOLVED · ${m.code}`), h('h2', {}, m.title)),
+    h('div', { class: 'hd' }, h('div', { class: 'stamp' }, 'RESOLVED', h('small', {}, `INC ${m.id.slice(1)} · ${fmtDuration(r.simSeconds)}`)), h('div', { class: 'eyebrow', style: { color: 'var(--green)' } }, `INCIDENT ${m.id.slice(1)} RESOLVED · ${m.code}`), h('h2', {}, m.title)),
     h('div', { class: 'bd' },
       h('div', { class: 'metrics' },
         h('div', { class: 'metric' }, h('b', {}, fmtDuration(r.simSeconds)), h('small', {}, 'TIME TO RESTORE')),
@@ -75,7 +75,7 @@ export function debrief(app, m, res, { onNext, onReplay, last }) {
 export function shiftComplete(app, results) {
   const total = results.reduce((a, r) => a + r.reputation, 0);
   const card = h('div', { class: 'card glass', role: 'dialog' },
-    h('div', { class: 'hd' }, h('div', { class: 'eyebrow', style: { color: 'var(--green)' } }, 'SHIFT COMPLETE · 06:00'), h('h2', {}, 'District 04 is back online')),
+    h('div', { class: 'hd' }, h('div', { class: 'stamp' }, 'SHIFT END', h('small', {}, '06:00 · DISTRICT 04')), h('div', { class: 'eyebrow', style: { color: 'var(--green)' } }, 'SHIFT COMPLETE · 06:00'), h('h2', {}, 'District 04 is back online')),
     h('div', { class: 'bd' },
       h('p', {}, `Ten incidents resolved. Reputation ${total}. That is guided practice: the incidents were scripted and hints were available.`),
       h('p', {}, 'The next step is the one that matters for real skill: Night Shift challenges reshuffle the addressing plan, inject faults you have not seen in that combination, and remove the trainer notes. Come back tomorrow for the delayed-recall evidence.'),
@@ -139,7 +139,7 @@ export function ticket(app, ch, onGo) {
 export function challengeDone(app, res) {
   const r = res.result;
   const card = h('div', { class: 'card glass' },
-    h('div', { class: 'hd' }, h('div', { class: 'eyebrow', style: { color: 'var(--green)' } }, 'TICKET CLOSED'), h('h2', {}, r.unguided ? 'Solved unguided' : 'Solved with hints')),
+    h('div', { class: 'hd' }, h('div', { class: 'stamp' }, 'CLOSED', h('small', {}, r.unguided ? 'NO HINTS' : `${r.hints} HINT${r.hints === 1 ? '' : 'S'}`)), h('div', { class: 'eyebrow', style: { color: 'var(--green)' } }, 'TICKET CLOSED'), h('h2', {}, r.unguided ? 'Solved unguided' : 'Solved with hints')),
     h('div', { class: 'bd' },
       h('div', { class: 'metrics' }, h('div', { class: 'metric' }, h('b', {}, fmtDuration(r.simSeconds)), h('small', {}, 'TIME')), h('div', { class: 'metric' }, h('b', {}, r.changes), h('small', {}, 'CHANGES')), h('div', { class: 'metric' }, h('b', {}, r.hints), h('small', {}, 'HINTS')), h('div', { class: 'metric' }, h('b', {}, r.collateral), h('small', {}, 'EXTRA BREAKAGE'))),
       h('h4', {}, 'What was broken'), h('ul', { class: 'clean' }, app.challenge.ch.faults.map(f => h('li', {}, f.title, h('span', { class: 'muted' }, ` · ${f.objectives.join(', ')}`)))),
@@ -249,7 +249,9 @@ export function about(app) {
         h('li', {}, 'No IPv6, dynamic routing, wireless RF, VPN, NTP, SNMP, cloud or real TCP state machines yet. ACL denies are silent drops. DHCP lease expiry and Windows negative DNS caching are not modelled.'),
         h('li', {}, 'Packet loss, latency and voice MOS are modelled per link and are illustrative, not measured.'),
         h('li', {}, 'This has not been validated with learners yet. Finishing it is not evidence that you are ready for the Network+ exam.')),
-      h('p', { class: 'muted' }, 'See docs/SIMULATION_MODEL.md and docs/QA_AND_NEXT_ITERATION.md in the repository for details and the playtest protocol.')),
+      h('p', { class: 'muted' }, 'See docs/SIMULATION_MODEL.md and docs/QA_AND_NEXT_ITERATION.md in the repository for details and the playtest protocol.'),
+      h('h4', {}, 'Credits'),
+      h('p', { class: 'muted', style: { fontSize: '12.5px' } }, 'Rendering: three.js (MIT). Type: Big Shoulders Display, IBM Plex Mono and IBM Plex Sans Condensed, all under the SIL Open Font License 1.1. Full notices: docs/THIRD_PARTY.md.')),
     h('div', { class: 'ft' }, h('button', { class: 'btn primary', onclick: () => { ov.remove(); app.afterMenu(); } }, 'Close')));
   ov = overlay(card, { onClose: () => { ov.remove(); app.afterMenu(); } });
 }

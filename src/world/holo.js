@@ -47,7 +47,7 @@ export class Holo {
     vol.position.y = 0.65;
     this.group.add(vol);
     this.vol = vol;
-    this.light = new THREE.PointLight(0x45e6ff, 2.2, 6, 2);
+    this.light = new THREE.PointLight(0x5cc8ff, 2.2, 6, 2);
     this.light.position.set(0, 1.2, 0);
     this.group.add(this.light);
   }
@@ -90,7 +90,7 @@ export class Holo {
         if (!a || !b) continue;
         const curve = new THREE.LineCurve3(a.group.position.clone(), b.group.position.clone());
         const geo = new THREE.TubeGeometry(curve, 1, 0.006, 5, false);
-        const mat = new THREE.MeshBasicMaterial({ color: 0x45e6ff, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false, blending: THREE.AdditiveBlending });
+        const mat = new THREE.MeshBasicMaterial({ color: 0x5cc8ff, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false, blending: THREE.AdditiveBlending });
         const line = new THREE.Mesh(geo, mat);
         this.group.add(line);
         this.edges.set(l.id, { line, mat, a: a.group.position, b: b.group.position });
@@ -102,7 +102,7 @@ export class Holo {
     for (const [id, e] of this.edges) {
       const ls = eng.linkStatus(id);
       e.storm = stormLinks.has(id);
-      e.mat.color.setHex(e.storm ? 0xff2a4a : ls.up ? (ls.mismatch ? 0xffb547 : 0x45e6ff) : 0xff3d5e).multiplyScalar(ls.up ? 1.6 : 1.2);
+      e.mat.color.setHex(e.storm ? 0xff3d5a : ls.up ? (ls.mismatch ? 0xffa53b : 0x5cc8ff) : 0xff3d5a).multiplyScalar(ls.up ? 1.6 : 1.2);
       e.mat.opacity = ls.up ? 0.85 : 0.35;
     }
     // node health: red if any flow from this node fails

@@ -4,11 +4,11 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { floorTextures, perforatedTexture, wallTexture, ceilingTexture, brushedMetal } from './textures.js';
 
 export const COLORS = {
-  cyan: 0x45e6ff,
+  cyan: 0x5cc8ff,
   teal: 0x2de0b5,
-  green: 0x37f59a,
-  amber: 0xffb547,
-  red: 0xff3d5e,
+  green: 0x3dffb4,
+  amber: 0xffa53b,
+  red: 0xff3d5a,
   white: 0xe8f6ff,
   violet: 0x8a7dff,
 };
@@ -55,11 +55,11 @@ export function materials() {
     cableJacket: std({ color: 0x25313b, roughness: 0.6, metalness: 0.1 }),
     plant: std({ color: 0x1f5a3f, roughness: 0.8, metalness: 0.0 }),
     planter: std({ color: 0x20262d, roughness: 0.4, metalness: 0.6 }),
-    lightPanel: new THREE.MeshStandardMaterial({ color: 0x0b0f12, emissive: 0xdff4ff, emissiveIntensity: 1.5, roughness: 1 }),
-    lightWarm: new THREE.MeshStandardMaterial({ color: 0x0b0f12, emissive: 0xffd2a1, emissiveIntensity: 2.2, roughness: 1 }),
-    stripCyan: new THREE.MeshStandardMaterial({ color: 0x041014, emissive: COLORS.cyan, emissiveIntensity: 1.8, roughness: 1 }),
-    stripTeal: new THREE.MeshStandardMaterial({ color: 0x041014, emissive: COLORS.teal, emissiveIntensity: 2.0, roughness: 1 }),
-    stripAmber: new THREE.MeshStandardMaterial({ color: 0x140b02, emissive: COLORS.amber, emissiveIntensity: 2.4, roughness: 1 }),
+    lightPanel: new THREE.MeshStandardMaterial({ color: 0x0b0f12, emissive: 0xf0e6cf, emissiveIntensity: 0.6, roughness: 1 }),
+    lightWarm: new THREE.MeshStandardMaterial({ color: 0x0b0f12, emissive: 0xffc98a, emissiveIntensity: 0.62, roughness: 1 }),
+    stripCyan: new THREE.MeshStandardMaterial({ color: 0x041014, emissive: 0xf0e6cf, emissiveIntensity: 0.45, roughness: 1 }),
+    stripTeal: new THREE.MeshStandardMaterial({ color: 0x041014, emissive: 0xf0e6cf, emissiveIntensity: 0.4, roughness: 1 }),
+    stripAmber: new THREE.MeshStandardMaterial({ color: 0x140b02, emissive: 0xffa53b, emissiveIntensity: 0.55, roughness: 1 }),
     stripRed: new THREE.MeshStandardMaterial({ color: 0x140205, emissive: COLORS.red, emissiveIntensity: 3.0, roughness: 1 }),
     black: new THREE.MeshBasicMaterial({ color: 0x000000 }),
   };

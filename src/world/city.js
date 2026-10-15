@@ -1,7 +1,7 @@
 // The city outside the window. Districts light up (or black out) with the services they depend on.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { buildingWindows, prng, radialGlow, labelTexture } from './textures.js';
+import { buildingWindows, prng, labelTexture } from './textures.js';
 
 const GROUND = -46;
 export const DISTRICTS = {
@@ -13,21 +13,24 @@ export const DISTRICTS = {
   voice: { x0: 340, x1: 560, color: 0xffc7a0, label: 'Voice' },
 };
 
+// Printed sky: flat ink bands with halftone between them and a sodium light-pollution band on the horizon.
 function skyMaterial() {
+  const lin = hex => new THREE.Color(hex);
   return new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { t: { value: 0 } },
+    uniforms: { t: { value: 0 }, c0: { value: lin(0x070a19) }, c1: { value: lin(0x111839) }, c2: { value: lin(0x26305f) }, c3: { value: lin(0x6a4a52) }, sod: { value: lin(0xffa53b) } },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `varying vec3 vDir; uniform float t;
+    fragmentShader: `varying vec3 vDir; uniform float t; uniform vec3 c0; uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform vec3 sod;
       void main(){
         float h = clamp(vDir.y, -0.2, 1.0);
-        vec3 zen = vec3(0.004, 0.012, 0.03);
-        vec3 mid = vec3(0.02, 0.06, 0.10);
-        vec3 hor = vec3(0.10, 0.17, 0.22);
-        vec3 glow = vec3(0.28, 0.16, 0.12);
-        vec3 c = mix(hor, mid, smoothstep(0.0, 0.18, h));
-        c = mix(c, zen, smoothstep(0.18, 0.75, h));
-        c += glow * exp(-abs(h) * 22.0) * 0.55;
+        float x = 1.0 - smoothstep(-0.02, 0.6, h);
+        x = x * x * 3.0;
+        vec2 p = mat2(0.866, -0.5, 0.5, 0.866) * (gl_FragCoord.xy / 5.0);
+        float dist = length(fract(p) - 0.5) * 1.4142;
+        float fl = floor(x);
+        float lv = fl + step(dist, sqrt(x - fl) * 0.98);
+        vec3 c = lv < 0.5 ? c0 : lv < 1.5 ? c1 : lv < 2.5 ? c2 : c3;
+        c += sod * 0.06 * exp(-abs(h - 0.01) * 40.0);
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
@@ -68,31 +71,34 @@ export class City {
     }
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
-    this.group.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xbfe6ff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0.7, fog: false, depthWrite: false })));
-    // moon
-    const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialGlow('210,235,255'), color: 0xffffff, transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending }));
-    moon.position.set(-420, 380, -1000);
-    moon.scale.set(220, 220, 1);
-    this.group.add(moon);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(22, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.7, 1.8), fog: false, toneMapped: false }));
-    disc.position.copy(moon.position).add(new THREE.Vector3(0, 0, 5));
+    this.group.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: new THREE.Color(0xf0e6cf).multiplyScalar(0.55), size: 1.5, sizeAttenuation: false, transparent: true, opacity: 0.8, fog: false, depthWrite: false })));
+    // moon: a flat paper disc with printed halo rings (it lights nothing; it is not signal)
+    const moonPos = new THREE.Vector3(-420, 380, -1000);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(26, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xf0e6cf).multiplyScalar(0.62), fog: false, toneMapped: false }));
+    disc.position.copy(moonPos);
     disc.lookAt(0, 0, 0);
     this.group.add(disc);
+    for (const [r, o] of [[34, 0.16], [46, 0.09], [62, 0.05]]) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(r, r + 1.6, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xf0e6cf).multiplyScalar(o), fog: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      ring.position.copy(moonPos).add(new THREE.Vector3(0, 0, 2));
+      ring.lookAt(0, 0, 0);
+      this.group.add(ring);
+    }
 
     // ground with street grid
     const gc = document.createElement('canvas');
     gc.width = gc.height = 512;
     const gx = gc.getContext('2d');
-    gx.fillStyle = '#020407';
+    gx.fillStyle = '#05070f';
     gx.fillRect(0, 0, 512, 512);
-    gx.strokeStyle = 'rgba(255,190,120,0.55)';
+    gx.strokeStyle = 'rgba(255,165,59,0.9)';
     gx.lineWidth = 3;
     for (let i = 0; i <= 512; i += 64) { gx.beginPath(); gx.moveTo(i, 0); gx.lineTo(i, 512); gx.stroke(); gx.beginPath(); gx.moveTo(0, i); gx.lineTo(512, i); gx.stroke(); }
     const gt = new THREE.CanvasTexture(gc);
     gt.colorSpace = THREE.SRGBColorSpace;
     gt.wrapS = gt.wrapT = THREE.RepeatWrapping;
     gt.repeat.set(16, 16);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshStandardMaterial({ color: 0x05080b, emissiveMap: gt, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 1 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshBasicMaterial({ color: 0xffffff, map: gt, fog: true }));
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(0, GROUND, -600);
     this.group.add(ground);
@@ -148,7 +154,7 @@ export class City {
     tower.position.set(-95, GROUND + 75, -260);
     this.group.add(tower);
     this.clinicTower = tower;
-    const crossTex = labelTexture('✚  CITY CLINIC', { w: 1024, h: 256, font: 'bold 150px "Segoe UI", sans-serif', fg: '#ffffff', bg: null });
+    const crossTex = labelTexture('✚  CITY CLINIC', { w: 1024, h: 256, font: '900 170px "Big Shoulders Display", "Segoe UI", sans-serif', fg: '#ffffff', bg: null });
     this.cross = new THREE.Mesh(new THREE.PlaneGeometry(38, 9.5), new THREE.MeshBasicMaterial({ map: crossTex, color: new THREE.Color(0.2, 0.05, 0.05), transparent: true, toneMapped: false, fog: false }));
     this.cross.position.set(-95, GROUND + 142, -244.8);
     this.group.add(this.cross);
@@ -173,7 +179,7 @@ export class City {
     this.cars = new THREE.Points(cg, new THREE.PointsMaterial({ size: 2.4, sizeAttenuation: false, vertexColors: true, transparent: true, depthWrite: false }));
     this.group.add(this.cars);
 
-    this.fog = new THREE.FogExp2(0x0b1620, 0.0016);
+    this.fog = new THREE.FogExp2(0x161c3d, 0.0016);
     scene.fog = this.fog;
   }
 

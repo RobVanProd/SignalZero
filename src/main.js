@@ -21,8 +21,16 @@ function webgl2() {
   try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
+// The embedded fonts must be ready before canvas textures (signs, screens) are drawn with them.
+function fontsReady() {
+  const faces = ['900 40px "Big Shoulders Display"', '800 40px "Big Shoulders Display"', '600 40px "Big Shoulders Display"', '400 14px "IBM Plex Mono"', '600 14px "IBM Plex Mono"', '400 14px "IBM Plex Sans Condensed"', '600 14px "IBM Plex Sans Condensed"'];
+  const all = Promise.all(faces.map(f => document.fonts?.load(f).catch(() => null)));
+  return Promise.race([all, new Promise(r => setTimeout(r, 2500))]);
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
   if (!webgl2()) return fail('Your browser or device did not provide a WebGL 2 context. Try a current Chrome, Edge, Firefox or Safari, and check that hardware acceleration is enabled.');
+  await fontsReady();
   requestAnimationFrame(() => {
     try {
       window.SZ = new App();

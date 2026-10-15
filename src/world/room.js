@@ -1,13 +1,13 @@
 // Architecture: NOC floor, window wall, lobby, Sector B corridor and room, ceiling fixtures, cable trays.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { Batcher, COLORS } from './materials.js';
+import { Batcher } from './materials.js';
 import { ROOM, CORRIDOR, SECTOR_B, LOBBY, DOOR_B, TRAY_SEGMENTS, RACK, RACKS } from './layout.js';
 import { labelTexture } from './textures.js';
 
 export function sign(text, opts, w, h) {
   const t = labelTexture(text, opts);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, transparent: true, toneMapped: false }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, transparent: true, toneMapped: false, color: new THREE.Color(0.6, 0.6, 0.6) }));
   return m;
 }
 
@@ -93,7 +93,7 @@ export function buildRoom(scene, M, q) {
   B.box(LOBBY.x1 - LOBBY.x0, ROOM.h - 3.2, 0.12, (LOBBY.x0 + LOBBY.x1) / 2, 3.2 + (ROOM.h - 3.2) / 2, LOBBY.z0, M.wallDark);
   B.box(0.12, 3.2, ROOM.z1 - LOBBY.z0, LOBBY.x0, 1.6, (LOBBY.z0 + ROOM.z1) / 2, M.wallDark);
   colliders.push({ x0: LOBBY.x0 - 0.12, x1: LOBBY.x0 + 0.12, z0: LOBBY.z0, z1: ROOM.z1 });
-  const lobbySign = sign('GUEST LOBBY', { w: 1024, h: 128, font: '600 58px "Segoe UI", sans-serif', fg: '#bff3ff', bg: null }, 2.4, 0.3);
+  const lobbySign = sign('GUEST LOBBY', { w: 1024, h: 128, font: '800 58px "Big Shoulders Display", sans-serif', fg: '#f0e6cf', bg: null }, 2.4, 0.3);
   lobbySign.position.set(8.4, 3.55, LOBBY.z0 - 0.07);
   lobbySign.rotation.y = Math.PI;
   root.add(lobbySign);
@@ -118,7 +118,7 @@ export function buildRoom(scene, M, q) {
   B.box(0.2, S.h - CORRIDOR.h, CORRIDOR.z1 - CORRIDOR.z0, S.x0, CORRIDOR.h + (S.h - CORRIDOR.h) / 2, (CORRIDOR.z0 + CORRIDOR.z1) / 2, M.wall);
   for (let x = S.x0 + 1.5; x < S.x1 - 0.5; x += 2.5) for (let z = S.z0 + 1.5; z < S.z1 - 0.5; z += 3) B.box(1.2, 0.03, 0.3, x, S.h - 0.02, z, M.lightPanel);
   B.box(S.x1 - S.x0 - 0.4, 0.025, 0.02, (S.x0 + S.x1) / 2, 0.08, S.z1 - 0.11, M.stripTeal);
-  const secSign = sign('SECTOR B · WARD & SECURITY', { w: 1536, h: 160, font: '600 64px "Segoe UI", sans-serif', fg: '#c8f7ff', bg: 'rgba(5,12,18,0.9)', border: 'rgba(80,220,255,0.35)' }, 2.6, 0.27);
+  const secSign = sign('SECTOR B · WARD & SECURITY', { w: 1536, h: 160, font: '800 64px "Big Shoulders Display", sans-serif', fg: '#f0e6cf', bg: '#0b0f26', border: '#ffa53b' }, 2.6, 0.27);
   secSign.position.set(ROOM.x1 - 0.12, 3.1, (DOOR_B.z0 + DOOR_B.z1) / 2);
   secSign.rotation.y = -Math.PI / 2;
   root.add(secSign);
@@ -183,11 +183,11 @@ export function buildRoom(scene, M, q) {
   B.box(0.2, 0.08, RACKS.length * RACK.w + 0.2, RACK.x - RACK.d / 2 - 0.1, 0.04, -4.0, M.trim);
 
   // ---------------- big wall sign
-  const title = sign('NETWORK OPERATIONS', { w: 2048, h: 220, font: '200 120px "Segoe UI", sans-serif', fg: '#e6fbff', bg: null }, 5.5, 0.6);
+  const title = sign('NETWORK OPERATIONS', { w: 2048, h: 220, font: '200 120px "Segoe UI", sans-serif', fg: '#f0e6cf', bg: null }, 5.5, 0.6);
   title.position.set(-2.5, 3.2, ROOM.z1 - 0.13);
   title.rotation.y = Math.PI;
   root.add(title);
-  const sub = sign('CITY OF HALDEN · DISTRICT 04 · NIGHT SHIFT', { w: 2048, h: 120, font: '600 54px "Segoe UI", sans-serif', fg: '#5ee9ff', bg: null }, 5.5, 0.32);
+  const sub = sign('CITY OF HALDEN · DISTRICT 04 · NIGHT SHIFT', { w: 2048, h: 120, font: '800 54px "Big Shoulders Display", sans-serif', fg: '#5ee9ff', bg: null }, 5.5, 0.32);
   sub.position.set(-2.5, 2.72, ROOM.z1 - 0.13);
   sub.rotation.y = Math.PI;
   root.add(sub);

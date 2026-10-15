@@ -1,5 +1,6 @@
 // Physical cables for every simulated link, plus the packet particle system that animates real traces.
 import * as THREE from 'three';
+import { toonMaterial } from './style.js';
 import { routeBetween, PLACES } from './layout.js';
 import { PATCH_PANEL } from '../content/district.js';
 
@@ -116,7 +117,7 @@ export class Cables {
     const curve = new THREE.CatmullRomCurve3(dedup, false, 'centripetal');
     const length = curve.getLength();
     const color = link.patch ? CORD_COLORS[link.label.replace('↔', '-')] ?? 0x2d8cff : link.id === 'wan' ? 0xff8a1e : 0x5d6b78;
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, emissive: 0x000000 });
+    const mat = toonMaterial({ color, emissive: 0x000000 });
     const geo = new THREE.TubeGeometry(curve, Math.min(600, Math.max(24, Math.floor(length * 22))), link.patch ? 0.0042 : 0.0035, 5, false);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = false;
@@ -207,7 +208,7 @@ export class Packets {
     this.items.push({ kind: 'travel', segs, seg: 0, u: 0, color: new THREE.Color(opts.color ?? 0x5ef1ff), speed: opts.speed ?? 6, size: opts.size ?? 0.05, dieAt: opts.dieAt ?? null, trail: opts.trail ?? 3, then: opts.then || null, burst: opts.burst ?? null });
   }
 
-  burst(p, color = 0xff3d5e, n = 14) {
+  burst(p, color = 0xff3d5a, n = 14) {
     for (let i = 0; i < n; i++) {
       const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize().multiplyScalar(0.4 + Math.random() * 0.8);
       this.items.push({ kind: 'spark', p: p.clone(), v, life: 0.7 + Math.random() * 0.4, age: 0, color: new THREE.Color(color), size: 0.035 });
@@ -241,7 +242,7 @@ export class Packets {
       it.u += (speed * dt) / Math.max(0.05, seg.length);
       if (it.dieAt !== null && it.seg === it.dieAt && it.u >= 0.5) {
         seg.curve.getPointAt(seg.rev ? 0.5 : 0.5, tmp);
-        this.burst(tmp, 0xff3d5e);
+        this.burst(tmp, 0xff3d5a);
         continue;
       }
       if (it.u >= 1) {

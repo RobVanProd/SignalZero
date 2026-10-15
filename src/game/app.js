@@ -468,12 +468,14 @@ export class App {
     addEventListener('keydown', e => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       this.sound.ensure();
+      // modal cards (briefing, debrief, pause…) are plain .overlay elements without an overlayKind
+      const modal = !!document.querySelector('#ui > .overlay');
       if (e.code === 'Escape') {
         if (this.overlayKind && this.overlayKind !== 'menu') { e.preventDefault(); this.closeOverlay(); return; }
-        if (!this.overlayKind && this.mode !== 'title') { e.preventDefault(); this.openMenu(); }
+        if (!this.overlayKind && !modal && this.mode !== 'title') { e.preventDefault(); this.openMenu(); }
         return;
       }
-      if (this.mode === 'title' || this.overlayKind) return;
+      if (this.mode === 'title' || this.overlayKind || modal) return;
       if (e.code === 'KeyE' || e.code === 'Enter') { e.preventDefault(); this.interact(); }
       else if (e.code === 'KeyM') { e.preventDefault(); this.openMap(); }
       else if (e.code === 'KeyH') { e.preventDefault(); this.openGuide(); }
