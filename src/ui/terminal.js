@@ -86,7 +86,7 @@ export class TerminalWindow {
     clear(this.out);
     const frag = document.createDocumentFragment();
     for (const l of c.lines.slice(-400)) {
-      if (l.t === 'note') { if (this.app.trainerNotes) frag.append(h('span', { class: 'note' }, l.text)); continue; }
+      if (l.t === 'note') { if (l.coach ? this.app.coach.active : this.app.trainerNotes) frag.append(h('span', { class: `note${l.coach ? ' coach' : ''}` }, l.text)); continue; }
       if (l.t === 'cmd') { frag.append(h('div', { class: 'ln cmd' }, h('span', { class: 'pr' }, l.prompt + ' '), l.text)); continue; }
       frag.append(h('div', { class: 'ln' }, l.text));
     }
@@ -99,7 +99,7 @@ export class TerminalWindow {
     const c = this.console(this.devId);
     for (const l of lines) {
       if (typeof l === 'string') c.lines.push({ t: 'out', text: l });
-      else if (l && l.t === 'note') c.lines.push({ t: 'note', text: l.text });
+      else if (l && l.t === 'note') c.lines.push({ t: 'note', text: l.text, coach: !!l.coach });
     }
     if (c.lines.length > 600) c.lines.splice(0, c.lines.length - 600);
   }
@@ -161,6 +161,18 @@ export class TerminalWindow {
     const d = app.eng.s.devices[this.devId];
     const ev = app.lastEval || {};
     const m = app.missionInfo();
+    const step = app.coach.active ? app.coach.current() : null;
+    if (step) {
+      const how = typeof step.how === 'string' ? step.how : app.touch ? step.how.touch : step.how.desktop;
+      const here = step.cmd && step.cmd.dev === this.devId;
+      side.append(h('h5', {}, `NEXT STEP ${app.coach.steps.indexOf(step) + 1} OF ${app.coach.steps.length}`), h('div', { class: 'sideblock coachside' },
+        h('div', { class: 't' }, step.title), h('div', { class: 'how' }, how),
+        here ? h('button', { class: 'chip go', title: 'Fill the prompt with this command, then press Enter', onclick: () => { this.input.value = step.cmd.text; if (!app.touch) this.input.focus(); } }, `▸ ${step.cmd.text}`) : null,
+        step.cmd && !here ? h('div', { class: 'elsewhere' }, `This step runs on ${step.cmd.dev}. Close this window (Esc) and follow the orange marker.`) : null,
+        step.where && step.where !== this.devId && !step.cmd ? h('div', { class: 'elsewhere' }, `Next: ${step.where === 'PATCH' ? 'the patch panel in RACK C' : step.where}. Close this window (Esc) and follow the orange marker.`) : null));
+    }
+    const last = app.coach.active ? app.coach.last : null;
+    if (last?.learned) side.append(h('h5', {}, `LAST RESULT · ${last.title.toUpperCase()}`), h('div', { class: 'sideblock lastres' }, last.learned));
     if (m) {
       side.append(h('h5', {}, m.code), h('div', { class: 'sideblock' }, h('div', { style: { fontWeight: 800, marginBottom: '6px' } }, m.title),
         h('ul', { class: 'checklist' }, [...(ev.goals || []).map(g => h('li', { class: g.ok ? 'ok' : '' }, h('span', { class: 'ck' }, g.ok ? '✓' : ''), g.label)),

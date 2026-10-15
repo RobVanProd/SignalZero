@@ -4,10 +4,11 @@ import { World } from '../world/world.js';
 import { detectQuality } from '../world/renderer.js';
 import { STATIONS, PLACES } from '../world/layout.js';
 import { Engine, wallClock } from '../engine/engine.js';
-import { buildDistrict, patchConnect, patchDisconnect } from '../content/district.js';
+import { buildDistrict, patchConnect, patchDisconnect, PATCH_PANEL } from '../content/district.js';
 import { MISSIONS, enableFlows, buildMissionStart } from '../content/missions.js';
 import { generateChallenge, ChallengeRun, healthReport } from '../content/challenges.js';
 import { Campaign } from './campaign.js';
+import { Coach } from './coach.js';
 import { execute, saveFile as cliSave, createSession } from '../cli/index.js';
 import { emptyProgress, recordMission, recordChallenge, recordTransfer, PROGRESS_KEY } from './progress.js';
 import { Telemetry, TELEMETRY_KEY } from './telemetry.js';
@@ -33,7 +34,7 @@ function store(key, value) {
 export class App {
   constructor() {
     this.touch = matchMedia('(pointer: coarse)').matches;
-    this.settings = { quality: null, sensitivity: 1, invertY: false, trainerNotes: true, volume: 0.6, unlockAll: false, ...load(SETTINGS_KEY, {}) };
+    this.settings = { quality: null, sensitivity: 1, invertY: false, trainerNotes: true, coach: true, volume: 0.6, unlockAll: false, ...load(SETTINGS_KEY, {}) };
     const params = new URLSearchParams(location.search);
     const q = params.get('q') || this.settings.quality || detectQuality();
     this.world = new World(document.getElementById('view'), q);
@@ -45,6 +46,7 @@ export class App {
     this.term = new TerminalWindow(this);
     this.patchWin = new PatchWindow(this);
     this.mapWin = new MapWindow(this);
+    this.coach = new Coach(this);
     this.mode = 'title';
     this.consoles = {};
     this.captures = {};
@@ -158,7 +160,7 @@ export class App {
     for (const [k, c] of Object.entries(sv.consoles || {})) this.consoles[k] = { lines: c.lines || [], hist: c.hist || [], sess: c.sess || createSession(eng, k) };
     this.telemetry.log('campaign-continue', { mission: this.campaign.mission?.id });
     if (this.campaign.st.phase === 'complete') this.advanceCampaign();
-    else { this.evaluate('action'); this.hud.say(this.campaign.mission.radioStart); }
+    else { this.coach.reset(this.campaign.mission, this.campaign.st.coach?.[this.campaign.mission.id]); this.evaluate('action'); this.hud.say(this.campaign.mission.radioStart); }
   }
 
   replayMission(i) {
@@ -166,6 +168,7 @@ export class App {
     const eng = buildMissionStart(buildDistrict, Engine, i);
     this.campaign = new Campaign(eng, { index: i, phase: 'main', okSince: null, startT: eng.s.t, startChange: eng.s.changeSeq, startEvent: eng.s.eventSeq, hints: {}, results: [], done: false });
     this.startEngine(eng, 'replay');
+    this.coach.reset(MISSIONS[i]);
     this.telemetry.log('replay', { mission: MISSIONS[i].id });
     S.briefing(this, MISSIONS[i], () => { this.hud.say(MISSIONS[i].radioStart); this.evaluate('action'); });
     this.evaluate('action');
@@ -173,6 +176,7 @@ export class App {
 
   beginMission(i) {
     const r = this.campaign.begin(i);
+    this.coach.reset(MISSIONS[i], this.campaign.st.coach?.[MISSIONS[i].id]);
     this.world.sync(this.eng, this.view());
     this.evaluate('action');
     this.telemetry.log('mission-start', { id: MISSIONS[i].id });
@@ -187,6 +191,7 @@ export class App {
     try { ch = generateChallenge(seed, opts); } catch (e) { alert(`Could not generate a challenge: ${e.message}`); return this.showTitle(); }
     this.challenge = new ChallengeRun(ch);
     this.campaign = null;
+    this.coach.reset(null);
     this.startEngine(ch.eng, 'challenge');
     this.telemetry.log('challenge-start', { seed, faults: ch.faults.map(f => f.id) });
     this.world.controls.enabled = false;
@@ -197,6 +202,7 @@ export class App {
   quitToTitle() {
     this.save();
     this.closeOverlay();
+    this.coach.reset(null);
     this.campaign = null;
     this.challenge = null;
     this.showTitle();
@@ -219,7 +225,7 @@ export class App {
     // Player actions refresh the monitored flows at once, so the services panel agrees with the checklist
     // instead of lagging up to one 5 s flow tick behind it. (Flow probes are not recorded as player evidence.)
     if (source !== 'tick' && this.eng && this.mode !== 'title') { this.eng.evaluateFlows(); this.hud.setServices(this.eng); }
-    if (this.campaign) return this.evalCampaign(source);
+    if (this.campaign) { const ev = this.evalCampaign(source); this.coach.update(); this.hud.setCoach(this.coach); return ev; }
     if (this.challenge) return this.evalChallenge(source);
     return null;
   }
@@ -320,6 +326,8 @@ export class App {
     try { r = execute(eng, sess, line); } catch (e) { console.error(e); r = { lines: [`% internal simulator error: ${e.message}`] }; }
     const last = eng.s.events[eng.s.events.length - 1];
     this.telemetry.command(devId, line, last?.type === 'command' && last.unknown);
+    const tips = this.coach.onCommand(devId, line, r);
+    if (tips.length) r = { ...r, lines: [...(r.lines || []), ...tips.map(t => ({ ...t, coach: true }))] };
     if (r.trace || r.frames) {
       this.captures[devId] = { cmd: line.trim(), probe: r.trace || null, frames: r.frames || null };
       if (r.trace) this.world.playProbe(eng, r.trace);
@@ -343,6 +351,7 @@ export class App {
     const r = patchConnect(this.eng, a, b);
     this.telemetry.log('patch', { a, b, ok: r.ok });
     if (r.ok) { this.sound.use(); this.evaluate('action'); this.world.sync(this.eng, this.view()); this.dirty = true; } else this.sound.deny();
+    this.coach.onPatch(r);
     return r;
   }
 
@@ -381,10 +390,33 @@ export class App {
   focusTerminal() { if (this.term.ov && !this.touch) this.term.input?.focus(); }
 
   // ---------------------------------------------------------------- overlays & interaction
+  /** What a cable is and where it goes, for the aim prompt (pseudo-station for the HUD). */
+  describeCable(info) {
+    const s = this.eng.s;
+    const lab = id => PATCH_PANEL.find(p => p.id === id)?.label || id;
+    if (info.kind === 'run') {
+      const cord = s.patch.cords.find(c => c.includes(info.panel));
+      const other = cord && cord.find(x => x !== info.panel);
+      return { type: 'cable-patch', label: `CABLE · ${info.dev} ${info.port} → PATCH PANEL ${info.panel}`, sub: `Permanent cable, wired behind the panel. Front of ${info.panel}: ${other ? `patch cord to ${other} (${lab(other)})` : 'EMPTY, no patch cord'}.` };
+    }
+    const l = s.links[info.link];
+    if (!l) return null;
+    const ls = this.eng.linkStatus(l.id);
+    const state = ls.up ? `link up · ${ls.speed}${ls.speed === 'wifi' ? '' : ' Mb/s'}${ls.mismatch ? ' · DUPLEX MISMATCH' : ` ${ls.duplexA}-duplex`}` : `NO LINK (${ls.reason || 'down'})`;
+    if (info.kind === 'cord') return { type: 'cable-patch', label: `PATCH CORD · ${l.label.replace('↔', ' ↔ ')}`, sub: `${l.a.dev} ${l.a.port} ↔ ${l.b.dev} ${l.b.port} · ${state}` };
+    return { type: 'cable', label: `CABLE · ${l.a.dev} ${l.a.port} ↔ ${l.b.dev} ${l.b.port}`, sub: `${state}. A permanent cable: you work on it from the switch ports at either end.` };
+  }
+
   interact() {
     if (this.mode === 'title' || this.overlayKind) return;
     const p = this.pick;
     if (!p) { this.sound.deny(); return; }
+    if (p.cable) {
+      const d = this.describeCable(p.cable);
+      if (d?.type === 'cable-patch') { this.sound.use(); this.openStation(STATIONS.find(s => s.id === 'PATCH')); }
+      else if (d) this.hud.say(`${d.label}: ${d.sub}`, 'CABLE', 7000);
+      return;
+    }
     const st = STATIONS.find(s => s.id === p.station);
     if (!st) return;
     if (st.dev && this.eng.s.devices[st.dev]?.powered === false) { this.hud.say(`${st.label} has no power yet.`, 'SYSTEM', 4000); this.sound.deny(); return; }
@@ -396,6 +428,7 @@ export class App {
   openStation(st) {
     document.exitPointerLock?.();
     this.world.controls.enabled = false;
+    this.coach.noteOpen(st.type === 'map' ? 'map' : st.id);
     if (st.type === 'console') {
       this.overlayKind = 'term';
       if (['CORE-SRV', 'CLINIC-APP', 'CCTV-NVR'].includes(st.dev)) this.kvm = st.dev;
@@ -413,6 +446,7 @@ export class App {
     this.world.controls.enabled = false;
     this.overlayKind = 'map';
     this.mapWin.open('topology');
+    this.coach.noteOpen('map');
   }
 
   closeOverlay() {
@@ -555,12 +589,19 @@ export class App {
       }
       if (this.acc.save >= 5 && this.dirty) { this.acc.save = 0; this.dirty = false; this.save(); this.saveProgress(); }
       this.hud.setLookHint(!this.touch && !this.locked && !this.overlayKind && this.world.controls.enabled && !document.querySelector('.overlay'));
+      this.coach.track(this.world.controls);
       if (!this.overlayKind && this.world.controls.enabled) {
         this.pick = this.world.pick();
-        const st = this.pick && STATIONS.find(s => s.id === this.pick.station);
-        const ok = st && (!st.dev || this.eng.s.devices[st.dev]?.powered !== false);
-        this.hud.setPrompt(ok ? st : null, ok ? this.world.screenRect(this.pick.object) : null);
+        if (this.pick?.cable) this.hud.setPrompt(this.describeCable(this.pick.cable), null);
+        else {
+          const st = this.pick && STATIONS.find(s => s.id === this.pick.station);
+          const ok = st && (!st.dev || this.eng.s.devices[st.dev]?.powered !== false);
+          this.hud.setPrompt(ok ? st : null, ok ? this.world.screenRect(this.pick.object) : null);
+        }
       } else this.hud.setPrompt(null);
+      const step = this.coach.active && !this.overlayKind && !document.querySelector('#ui > .overlay') ? this.coach.current() : null;
+      const target = step?.where && this.pick?.station !== step.where ? this.world.projectStation(step.where) : null;
+      this.hud.setWaypoint(target ? { ...target, label: STATIONS.find(s => s.id === step.where)?.label || step.where } : null);
     } else {
       // attract mode: slow orbit through the room
       const t = now / 1000;

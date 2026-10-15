@@ -21,13 +21,14 @@ Open `dist/signal-zero.html` in a current Chrome, Edge, Firefox or Safari. If yo
 
 | Mode | What it trains |
 |---|---|
-| **Night shift campaign** (10 incidents, one persistent network) | Guided: physical patching, DHCP service failure, stale DNS + client cache, uninstalled default route, VLAN + ACL segmentation, broadcast storm with an aftershock, DHCP relay, subnet re-planning for 50 cameras, duplex mismatch vs voice quality, rogue DHCP. |
+| **Night shift campaign** (10 incidents, one persistent network; incidents 1–4 come with a step-by-step coach) | Guided: physical patching, DHCP service failure, stale DNS + client cache, uninstalled default route, VLAN + ACL segmentation, broadcast storm with an aftershock, DHCP relay, subnet re-planning for 50 cameras, duplex mismatch vs voice quality, rogue DHCP. |
 | **Incident replay** | Any solved incident from a clean copy of the network at that point. |
 | **Night Shift challenge** | Unguided: randomised addressing and VLAN IDs, 1–2 injected faults from a library of 15, a symptom-only trouble ticket, no trainer notes. The generator proves each challenge is solvable before handing it out. |
 | **Skill evidence** | Per N10-009 objective: guided → unguided → delayed (≥24 h later) → transfer (self-reported). |
 
 Design rules carried over from the v0.2 plan:
 
+- **Coach, then fade.** Incidents 1–4 are broken into small steps. Each step says what to do and where, an orange marker points at the place, and the coach explains each result as it appears. Steps are detected from what you actually did and never block a correct fix. From incident 5 on, only hints remain; challenges have neither.
 - **No quiz gates.** Win conditions are behavioural checks against the simulator ("does Ward B's HTTPS request to the records app actually succeed?"), never "did you type this exact line". Any correct fix passes; a "fix" that breaks another service fails the constraints.
 - **Fix, then verify.** An incident completes only after the player produces evidence from a user-facing test *after* the fix (e.g. `curl` from the affected PC).
 - **Several valid interventions with measurable trade-offs.** In the broadcast storm, Rapid PVST+, PVST+ and "shut a riser" all stop the storm; a scripted riser cut later measures the outage each choice causes (≈1–2 s with Rapid PVST+ on both switches, ≈30 s with PVST+ or a mixed pair, or until a human reacts). In the rogue DHCP incident, shutting the port contains it; DHCP snooping prevents the repeat.

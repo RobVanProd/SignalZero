@@ -450,6 +450,13 @@ export class World {
     this.raycaster.far = 2.8;
     const visibleHits = this.hits.filter(h => h.userData.station !== 'ROGUE-AP' || this.rogue.visible);
     const hit = this.raycaster.intersectObjects(visibleHits, false)[0];
+    // Cables are aimable through invisible fat proxies. A cable in front of a station wins; behind the patch
+    // panel's box, a patch-panel cable also wins (both open the patch panel), but a device console keeps priority.
+    this.raycaster.far = 3.4;
+    const cable = this.raycaster.intersectObjects([...this.cables.proxies, ...this.cables.linkProxies], false)[0];
+    this.raycaster.far = 2.8;
+    const patchy = cable && (cable.object.userData.pick.kind === 'run' || cable.object.userData.pick.kind === 'cord');
+    if (cable && (!hit || cable.distance < hit.distance - 0.05 || (patchy && hit.object.userData.station === 'PATCH' && cable.distance < hit.distance + 0.6))) return { cable: cable.object.userData.pick, object: cable.object };
     if (hit) return { station: hit.object.userData.station, object: hit.object };
     const p = this.controls.pos;
     const fwd = new THREE.Vector2(-Math.sin(this.controls.yaw), -Math.cos(this.controls.yaw));
@@ -474,6 +481,33 @@ export class World {
     const xs = pts.map(p => (p.x * 0.5 + 0.5) * innerWidth);
     const ys = pts.map(p => (-p.y * 0.5 + 0.5) * innerHeight);
     return { x0: Math.max(8, Math.min(...xs)), x1: Math.min(innerWidth - 8, Math.max(...xs)), y0: Math.max(8, Math.min(...ys)), y1: Math.min(innerHeight - 8, Math.max(...ys)) };
+  }
+
+  /**
+   * Screen position of a station for the HUD waypoint. Off-screen or behind the camera, the point is pushed to
+   * the screen edge in the direction of the station and `edge` is set (angle points toward it).
+   */
+  projectStation(id) {
+    const hit = this.hits.find(h => h.userData.station === id);
+    if (!hit) return null;
+    const p = hit.getWorldPosition(new THREE.Vector3());
+    const dist = Math.hypot(p.x - this.controls.pos.x, p.z - this.controls.pos.z);
+    const v = p.clone().applyMatrix4(this.camera.matrixWorldInverse);
+    const W = innerWidth;
+    const H = innerHeight;
+    const m = 56;
+    if (v.z < 0) {
+      const s = p.clone().project(this.camera);
+      const x = (s.x * 0.5 + 0.5) * W;
+      const y = (-s.y * 0.5 + 0.5) * H;
+      if (x > m && x < W - m && y > m + 40 && y < H - m) return { x, y, dist, edge: false };
+    }
+    // direction in camera space (x right, y up); behind the camera the horizontal sense is the same
+    let dx = v.x;
+    let dy = v.z < 0 ? v.y : -Math.abs(v.y) * 0.2;
+    if (Math.hypot(dx, dy) < 1e-4) dx = 1;
+    const k = Math.min((W / 2 - m) / Math.max(Math.abs(dx), 1e-4), (H / 2 - m) / Math.max(Math.abs(dy), 1e-4));
+    return { x: W / 2 + dx * k, y: H / 2 - dy * k, dist, edge: true, angle: Math.atan2(-dy, dx) };
   }
 
   stationStand(id) {

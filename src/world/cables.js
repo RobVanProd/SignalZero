@@ -11,6 +11,26 @@ function anchorFor(anchors, dev, port) {
   return anchors[`${dev}|${port}`] || null;
 }
 
+/** Spread a run inside the trays so bundles look like bundles (ends stay on their ports). */
+function spread(pts, index) {
+  const o = new THREE.Vector3(((index % 7) - 3) * 0.014, ((index % 3) - 1) * 0.008, (((index * 3) % 5) - 2) * 0.012);
+  return pts.map((p, i) => (i > 2 && i < pts.length - 3 ? p.clone().add(o) : p.clone()));
+}
+
+function dedupe(pts) {
+  const out = [pts[0]];
+  for (const p of pts.slice(1)) if (p.distanceTo(out[out.length - 1]) > 0.01) out.push(p);
+  return out;
+}
+
+// Invisible fat tube along a cable so the player can aim at it (the visible cable is a few mm thick).
+const PICK_MAT = new THREE.MeshBasicMaterial({ visible: false });
+function pickProxy(curve, info) {
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, Math.floor(curve.getLength() * 4)), 0.045, 4, false), PICK_MAT);
+  m.userData.pick = info;
+  return m;
+}
+
 export class Cables {
   constructor(parent, anchors, patchPorts) {
     this.group = new THREE.Group();
@@ -29,6 +49,24 @@ export class Cables {
       new THREE.Vector3(10, 40, -260),
     ], false, 'centripetal');
     this.skyLen = this.skyCurve.getLength();
+    // Permanent cabling: every patch-panel port is wired, behind the panel, to the device on its label.
+    // These runs always exist; a patch cord on the front is what joins two of them.
+    this.proxies = [];
+    this.runs = {};
+    PATCH_PANEL.forEach((p, i) => {
+      const A = anchorFor(anchors, p.dev, p.port);
+      const PA = patchPorts[p.id];
+      if (!A || !PA) return;
+      const pts = dedupe(spread(routeBetween(A.p.toArray(), A.out, PA.toArray(), [1, 0, 0]), 20 + i));
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+      this.runs[p.id] = pts;
+      const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(400, Math.max(24, Math.floor(curve.getLength() * 22))), 0.0035, 5, false), toonMaterial({ color: /CONSOLE/.test(p.label) ? 0x6fa6c8 : 0x5d6b78 }));
+      this.group.add(mesh);
+      const proxy = pickProxy(curve, { kind: 'run', panel: p.id, dev: p.dev, port: p.port, label: p.label });
+      this.group.add(proxy);
+      this.proxies.push(proxy);
+    });
+    this.linkProxies = [];
   }
 
   /** (Re)build cable meshes when the set of links changes. */
@@ -39,12 +77,20 @@ export class Cables {
     if (sig !== this.signature) {
       this.signature = sig;
       for (const [, l] of this.links) if (l.mesh) { this.group.remove(l.mesh); l.mesh.geometry.dispose(); }
+      for (const m of this.linkProxies) { this.group.remove(m); m.geometry.dispose(); }
+      this.linkProxies = [];
       this.links.clear();
       let idx = 0;
       for (const id of ids) {
         const link = st.links[id];
         const built = this.buildLink(link, idx++);
-        if (built) this.links.set(id, built);
+        if (!built) continue;
+        this.links.set(id, built);
+        if (built.mesh) {
+          const proxy = pickProxy(built.drawn || built.curve, { kind: link.patch ? 'cord' : 'cable', link: id });
+          this.group.add(proxy);
+          this.linkProxies.push(proxy);
+        }
       }
     }
     // appearance
@@ -96,29 +142,28 @@ export class Cables {
       const B = anchorFor(this.anchors, devB.dev, devB.port);
       const PA = this.patchPorts[panelA];
       const PB = this.patchPorts[panelB];
-      if (!A || !B || !PA || !PB) return null;
-      const s1 = routeBetween(A.p.toArray(), A.out, PA.toArray(), [1, 0, 0]);
-      const cord = [PA.clone().add(new THREE.Vector3(0.05, 0, 0)), PA.clone().lerp(PB, 0.5).add(new THREE.Vector3(0.16, -0.12, 0)), PB.clone().add(new THREE.Vector3(0.05, 0, 0))];
-      const s2 = routeBetween(PB.toArray(), [1, 0, 0], B.p.toArray(), B.out);
-      pts = [...s1, ...cord, ...s2];
-      if (devA !== a) pts.reverse();
+      if (!A || !B || !PA || !PB || !this.runs[panelA] || !this.runs[panelB]) return null;
+      // the permanent runs are drawn already: draw only the cord on the front, packets follow run + cord + run
+      const cord = [PA.clone(), PA.clone().add(new THREE.Vector3(0.05, 0, 0)), PA.clone().lerp(PB, 0.5).add(new THREE.Vector3(0.16, -0.12, 0)), PB.clone().add(new THREE.Vector3(0.05, 0, 0)), PB.clone()];
+      const drawn = new THREE.CatmullRomCurve3(cord, false, 'centripetal');
+      let full = dedupe([...this.runs[panelA], ...cord.slice(1, -1), ...this.runs[panelB].slice().reverse()]);
+      if (devA !== a) full = full.reverse();
+      const curve = new THREE.CatmullRomCurve3(full, false, 'centripetal');
+      const color = CORD_COLORS[link.label.replace('↔', '-')] ?? 0x2d8cff;
+      const mesh = new THREE.Mesh(new THREE.TubeGeometry(drawn, 48, 0.0042, 6, false), toonMaterial({ color, emissive: 0x000000 }));
+      this.group.add(mesh);
+      return { kind: 'cable', curve, length: curve.getLength(), mesh, drawn };
     } else {
       const A = anchorFor(this.anchors, a.dev, a.port);
       const B = anchorFor(this.anchors, b.dev, b.port);
       if (!A || !B) return null;
       pts = routeBetween(A.p.toArray(), A.out, B.p.toArray(), B.out);
     }
-    // spread cables within the trays so bundles look like bundles
-    const ox = ((index % 7) - 3) * 0.014;
-    const oz = (((index * 3) % 5) - 2) * 0.012;
-    pts = pts.map((p, i) => (i > 2 && i < pts.length - 3 ? p.clone().add(new THREE.Vector3(ox, ((index % 3) - 1) * 0.008, oz)) : p));
-    const dedup = [pts[0]];
-    for (const p of pts.slice(1)) if (p.distanceTo(dedup[dedup.length - 1]) > 0.01) dedup.push(p);
-    const curve = new THREE.CatmullRomCurve3(dedup, false, 'centripetal');
+    const curve = new THREE.CatmullRomCurve3(dedupe(spread(pts, index)), false, 'centripetal');
     const length = curve.getLength();
-    const color = link.patch ? CORD_COLORS[link.label.replace('↔', '-')] ?? 0x2d8cff : link.id === 'wan' ? 0xff8a1e : 0x5d6b78;
+    const color = link.id === 'wan' ? 0xff8a1e : 0x5d6b78;
     const mat = toonMaterial({ color, emissive: 0x000000 });
-    const geo = new THREE.TubeGeometry(curve, Math.min(600, Math.max(24, Math.floor(length * 22))), link.patch ? 0.0042 : 0.0035, 5, false);
+    const geo = new THREE.TubeGeometry(curve, Math.min(600, Math.max(24, Math.floor(length * 22))), 0.0035, 5, false);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = false;
     this.group.add(mesh);

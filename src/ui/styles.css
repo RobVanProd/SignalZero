@@ -95,7 +95,7 @@ h1,h2,h3{margin:0}
 .svc.warn{color:var(--paper)}.svc.warn .dot{color:var(--sodium)}
 .svc em{font:600 11px var(--mono);font-style:normal;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .svc.ok em{color:var(--phos)}.svc.bad em{color:var(--fault)}.svc.warn em{color:var(--sodium)}
-#radio{position:absolute;left:16px;bottom:18px;width:min(440px,40vw);padding:12px 14px;opacity:0;transform:translateY(8px);transition:opacity .3s,transform .3s;pointer-events:none;border-left:6px solid var(--phos)}
+#radio{position:absolute;left:16px;bottom:70px;width:min(520px,44vw);max-height:42vh;overflow:auto;padding:12px 14px;opacity:0;transform:translateY(8px);transition:opacity .3s,transform .3s;pointer-events:none;border-left:6px solid var(--phos)}
 #radio.on{opacity:1;transform:none}
 #radio .who{font:600 10px var(--mono);letter-spacing:.18em;color:var(--phos);display:flex;align-items:center;gap:8px}
 #radio .who:before{content:"";width:8px;height:8px;background:var(--phos);animation:blink 1s steps(2) infinite}
@@ -115,6 +115,39 @@ h1,h2,h3{margin:0}
 #brackets i:nth-child(2){right:0;top:0;border-left:0;border-bottom:0}
 #brackets i:nth-child(3){left:0;bottom:0;border-right:0;border-top:0}
 #brackets i:nth-child(4){right:0;bottom:0;border-left:0;border-top:0}
+/* coach: NEXT STEP card, progress pips, waypoint */
+.coach{margin-top:12px;padding:10px 12px;border:1.5px solid var(--sodium);background:rgba(255,165,59,.07)}
+.coach.pulse{animation:coachpulse .7s ease-out}
+@keyframes coachpulse{0%{box-shadow:0 0 0 0 rgba(61,255,180,.7);border-color:var(--phos)}100%{box-shadow:0 0 0 14px rgba(61,255,180,0);border-color:var(--sodium)}}
+.coach .pips{display:flex;gap:3px;margin-bottom:8px}
+.coach .pips i{flex:1;height:5px;background:var(--rule)}
+.coach .pips i.ok{background:var(--phos)}
+.coach .pips i.now{background:var(--sodium)}
+.coach .k{font:600 10px var(--mono);letter-spacing:.18em;color:var(--sodium)}
+.coach .t{font:900 21px/1.05 var(--display);text-transform:uppercase;margin:3px 0 5px;color:var(--paper)}
+.coach .how{font-size:13px;line-height:1.45;color:var(--paper2)}
+.coach .cmd{margin-top:8px;display:flex;flex-direction:column;gap:3px}
+.coach .cmd small{font:600 9px var(--mono);letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+.coach .cmd code{display:block;font-size:13px;padding:4px 7px;border-color:var(--sodium);color:#fff}
+.coachside{border-color:var(--sodium);background:rgba(255,165,59,.07)}
+.coachside .t{font:900 19px/1.05 var(--display);text-transform:uppercase;margin-bottom:5px}
+.coachside .how{font-size:13px;line-height:1.45;color:var(--paper2)}
+.coachside .chip.go{margin-top:9px;width:100%;border-color:var(--sodium);color:var(--sodium);background:var(--panel)}
+.coachside .chip.go:hover{background:var(--sodium);color:var(--bg)}
+.lastres{font-size:12.5px;line-height:1.5;color:var(--paper2);border-left:4px solid var(--phos)}
+.coachside .elsewhere{margin-top:8px;font:600 12px var(--mono);color:var(--sodium)}
+.term .note.coach{border-color:var(--sodium);color:#ffd9a8}
+.term .note.coach:before{content:"COACH";background:var(--sodium)}
+.coachbrief{margin:12px 0 6px;font-size:13.5px}
+.coachbrief b{color:var(--sodium);font:600 11px var(--mono);letter-spacing:.14em}
+#waypoint{position:fixed;z-index:3;pointer-events:none;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;filter:drop-shadow(2px 2px 0 #02030a)}
+#waypoint .pin{order:3;width:16px;height:16px;background:var(--sodium);transform:rotate(45deg);margin-top:4px;animation:pin 1.2s ease-in-out infinite}
+#waypoint b{font:900 16px/1 var(--display);letter-spacing:.06em;color:var(--sodium);background:var(--bg);padding:3px 6px;border:1.5px solid var(--sodium)}
+#waypoint small{font:600 10px var(--mono);color:var(--paper);background:var(--bg);padding:1px 5px}
+#waypoint.edge{transform:translate(-50%,-50%)}
+#waypoint.edge .pin{order:0;width:0;height:0;background:none;border:10px solid transparent;border-left:16px solid var(--sodium);transform:rotate(var(--ang));animation:none;margin:0}
+@keyframes pin{50%{transform:rotate(45deg) translate(-3px,-3px)}}
+
 /* toast = rubber stamp */
 #toast{position:fixed;left:50%;top:16%;transform:translate(-50%,-10px) rotate(-3deg) scale(1.15);opacity:0;z-index:30;pointer-events:none;transition:opacity .18s,transform .22s cubic-bezier(.3,1.6,.5,1);text-align:center;padding:16px 30px 14px;min-width:min(520px,90vw);border:5px solid var(--phos);outline:2px solid var(--phos);outline-offset:4px;background:rgba(8,11,27,.92);color:var(--phos);-webkit-mask-image:radial-gradient(circle at 30% 40%,#000 60%,rgba(0,0,0,.82) 61%,#000 75%);mask-image:radial-gradient(circle at 30% 40%,#000 60%,rgba(0,0,0,.82) 61%,#000 75%)}
 #toast.on{opacity:1;transform:translate(-50%,0) rotate(-3deg) scale(1)}

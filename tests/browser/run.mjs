@@ -46,10 +46,23 @@ try {
     await p.screenshot({ path: path.join(OUT, '01-title.png') });
   });
   await step('campaign starts with a briefing', async () => {
+    await p.evaluate(() => { window.__SZ__.app.progress.coachBasics = true; }); // a returning player: skip the controls lesson
     await p.click('text=Begin night shift');
+    await p.waitForSelector('text=COACH IS ON');
     await p.waitForSelector('text=THE BROKEN LINK');
     await p.screenshot({ path: path.join(OUT, '02-briefing.png') });
     await p.click('text=Start incident');
+  });
+  await step('coach: next-step card, waypoint, and a coaching note for a rejected command', async () => {
+    await p.waitForSelector('#hud .coach:not(.hidden)');
+    assert.match(await p.textContent('#hud .coach'), /OPEN THE SWITCH CONSOLE/i);
+    await p.waitForSelector('#waypoint:not(.hidden)', { timeout: 15000 });
+    await p.evaluate(() => window.__SZ__.open('ACCESS-SW'));
+    await p.fill('.cmdline input', 'show cable-diagnostics tdr'); await p.press('.cmdline input', 'Enter');
+    await p.waitForSelector('.term .note.coach');
+    assert.match(await p.textContent('.term .note.coach'), /Type enable first/);
+    await p.screenshot({ path: path.join(OUT, '03a-coach.png') });
+    await p.keyboard.press('Escape');
   });
   await step('M01 solved through the patch panel UI and a show command', async () => {
     await p.evaluate(() => window.__SZ__.travel('PATCH'));
@@ -62,6 +75,7 @@ try {
     await p.evaluate(() => window.__SZ__.open('ACCESS-SW'));
     for (const c of ['enable', 'show interfaces status']) { await p.fill('.cmdline input', c); await p.press('.cmdline input', 'Enter'); }
     await p.screenshot({ path: path.join(OUT, '04-terminal.png') });
+    assert.equal(await p.evaluate(() => window.__SZ__.app.coach.current()?.id), 'verify', 'coach followed the fix to its last step');
     await p.waitForSelector('text=INCIDENT 01 RESOLVED', { timeout: 30000 });
     await p.screenshot({ path: path.join(OUT, '05-debrief.png') });
   });

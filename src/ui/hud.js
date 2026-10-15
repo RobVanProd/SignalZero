@@ -12,7 +12,8 @@ export class Hud {
     this.task = h('div', { class: 'task' });
     this.list = h('ul', { class: 'checklist' });
     this.state = h('div', { class: 'state hidden' });
-    this.mission = h('div', { class: 'mission glass area' }, this.code, this.title, this.task, this.list, this.state);
+    this.coachEl = h('div', { class: 'coach hidden' });
+    this.mission = h('div', { class: 'mission glass area' }, this.code, this.title, this.task, this.list, this.state, this.coachEl);
     this.clock = h('b', {}, '02:17');
     this.rep = h('b', {}, '0');
     this.warp = h('button', { class: 'ibtn', id: 'warp', title: 'Fast-forward time ×8 (T)', onclick: () => app.toggleWarp() }, '⏩');
@@ -36,9 +37,10 @@ export class Hud {
     this.lookHint = h('div', { class: 'glass', style: { position: 'fixed', left: '50%', top: '58%', transform: 'translateX(-50%)', padding: '10px 16px', font: '600 13px var(--sans)', pointerEvents: 'none', zIndex: 3 } }, 'Click to look around · ', h('span', { class: 'kbd' }, 'Esc'), ' releases the mouse');
     this.lookHint.classList.add('hidden');
     this.reticle = h('div', { id: 'reticle', class: 'hidden' });
+    this.waypoint = h('div', { id: 'waypoint', class: 'hidden' }, h('i', { class: 'pin' }), h('b'), h('small'));
     this.brackets = h('div', { id: 'brackets' }, h('i'), h('i'), h('i'), h('i'));
     this.toast = h('div', { id: 'toast' }, h('div', { class: 'k' }), h('div', { class: 't' }), h('div', { class: 's' }));
-    ui.append(this.root, this.reticle, this.brackets, this.toast, this.lookHint);
+    ui.append(this.root, this.reticle, this.brackets, this.toast, this.lookHint, this.waypoint);
   }
 
   show(on) {
@@ -100,7 +102,7 @@ export class Hud {
     if (!on) return;
     this.prompt.querySelector('b').textContent = station.label;
     this.prompt.querySelector('small').textContent = station.sub;
-    const verb = { console: 'OPEN CONSOLE', patch: 'WORK THE PATCH PANEL', map: 'VIEW NETWORK', phone: 'PICK UP PHONE', cctv: 'CHECK FEEDS', rogue: 'INSPECT DEVICE' }[station.type] || 'USE';
+    const verb = { console: 'OPEN CONSOLE', patch: 'WORK THE PATCH PANEL', map: 'VIEW NETWORK', phone: 'PICK UP PHONE', cctv: 'CHECK FEEDS', rogue: 'INSPECT DEVICE', 'cable-patch': 'OPEN THE PATCH PANEL', cable: 'INSPECT CABLE' }[station.type] || 'USE';
     this.prompt.querySelector('.act').textContent = `${this.app.touch ? 'TAP USE' : 'PRESS E'} · ${verb}`;
     if (rect) {
       const pad = 10;
@@ -118,6 +120,42 @@ export class Hud {
   }
 
   setWarp(on) { this.warp.classList.toggle('on', on); }
+
+  /** NEXT STEP card under the mission checklist. */
+  setCoach(coach) {
+    const el = this.coachEl;
+    const s = coach.active ? coach.current() : null;
+    el.classList.toggle('hidden', !s);
+    if (!s) return;
+    clear(el);
+    const n = coach.steps.indexOf(s);
+    const how = typeof s.how === 'string' ? s.how : this.app.touch ? s.how.touch : s.how.desktop;
+    el.append(...[
+      h('div', { class: 'pips' }, coach.steps.map((x, i) => h('i', { class: coach.done.has(x.id) ? 'ok' : i === n ? 'now' : '' }))),
+      h('div', { class: 'k' }, `NEXT STEP ${n + 1} OF ${coach.steps.length}`),
+      h('div', { class: 't' }, s.title),
+      h('div', { class: 'how' }, how),
+      s.cmd ? h('div', { class: 'cmd' }, h('small', {}, `on ${s.cmd.dev}`), h('code', {}, s.cmd.text)) : null].filter(Boolean));
+  }
+
+  coachPulse() {
+    this.coachEl.classList.remove('pulse');
+    void this.coachEl.offsetWidth;
+    this.coachEl.classList.add('pulse');
+  }
+
+  /** Orange marker over the station the current step needs; clamped to the screen edge with an arrow. */
+  setWaypoint(w) {
+    const el = this.waypoint;
+    el.classList.toggle('hidden', !w);
+    if (!w) return;
+    el.classList.toggle('edge', !!w.edge);
+    el.style.left = `${w.x}px`;
+    el.style.top = `${w.y}px`;
+    el.style.setProperty('--ang', `${w.angle || 0}rad`);
+    el.querySelector('b').textContent = w.label;
+    el.querySelector('small').textContent = w.dist < 2 ? (this.app.touch ? 'here · tap USE' : 'here · aim + E') : `${w.dist.toFixed(0)} m`;
+  }
 
   setLookHint(on) { this.lookHint.classList.toggle('hidden', !on); }
 }

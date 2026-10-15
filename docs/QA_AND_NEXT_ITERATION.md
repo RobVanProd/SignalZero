@@ -39,6 +39,19 @@ Date: 15 October 2026. The v0.2 QA document is preserved in [`prototype/v0.2/QA_
 - **Output fidelity.** Device outputs imitate real formats from documentation and experience, not from captured traffic or recorded sessions. An independent review found 7 high and 11 medium accuracy defects; 16 of them (all 7 high) plus 3 low ones are fixed with regression tests, and findings 10, 15, 17, 18 remain (listed in `docs/SIMULATION_MODEL.md`). Wording added by those fixes that is unconfirmed against real devices: BIND's "loading from master file" (9.18 may say "primary file") and rndc's unknown-zone error; dig's three "connection refused" lines and Linux nslookup's refused output; Windows nslookup "No response from server" for a refused query (low confidence); IOS "Routing entry for 0.0.0.0/0, supernet", the `show ip interface` NAT line, "% Invalid source interface", and the trimmed `show interfaces … switchport` / err-disabled layouts. A recorded comparison against real IOS/Windows/Ubuntu sessions has not been done.
 - **Network model vs a reference implementation.** The v0.2 plan's differential test against Linux namespaces or an emulator is still open.
 
+## First real play session (owner, n = 1, 15 Oct 2026)
+
+What happened in M01: the player found the fault from evidence (`show interfaces status`, then the TDR "Open" on all pairs at ~2 m) but used all three hints and still could not act. Nothing said that the fix is a patch cord at the panel, or how to reach and use the panel. They tried to click cables; cables were not interactive. They also hit IOS's `% Incomplete command` on `show cable-diagnostics tdr` with no guidance. Verdict in their words: the problem should be broken into steps with feedback "so we understand we are on the right path", plus a tutorial on how everything works.
+
+This falsifies the v0.3 assumption that a briefing plus three hints is enough onboarding for a non-expert. It is one player, so it says nothing about rates, but it was a hard stop, and that is enough to act on. Changes:
+
+- **Step-by-step coach** for incidents 1–4 (`src/content/coach.js`, `src/game/coach.js`). M01 opens with three controls lessons (look, walk, map). Each step says what to do, where, and the exact command. An orange waypoint points at the station. Each step is ticked off by observing what the player actually did, and on completion the coach explains what the result means (e.g. what "Open at 2 m" implies). A rejected command (`% Incomplete`, `% Invalid input`, wrong device) gets a coaching note in the console. Steps never gate the win; a player who fixes things directly skips ahead. On by default; Settings → Step-by-step coach.
+- **Inspectable cables:** every patch-panel port's permanent cable is now drawn. Aiming at a cable says what it connects and whether the panel port in front is empty. E on a patch-panel cable opens the panel.
+- **M01 hint 3** now says how to do the fix in this game.
+- Tests: `tests/unit/coach.test.js` walks M01–M04 through the coach with the real commands. The browser suite asserts the next-step card, the waypoint and a coaching note.
+
+Not yet known: whether the coach over-scaffolds (players follow steps without understanding). Add to the playtest: after M04 with the coach on, give each player M07 (relay, no coach) and record whether they diagnose it unaided. If coach users do worse on unguided M07 than a coach-off group, the coach is teaching button-pressing.
+
 ## Pre-registered playtest (proposal — agree the thresholds before running it)
 
 Participants: 5 non-networking players + 5 Tier-1 technicians (your v0.2 design), no tutorial beyond the in-game briefing. 45 minutes in campaign, then free choice. Export each player's log (Settings → Playtest log → Export JSON).

@@ -36,6 +36,7 @@ export function briefing(app, m, onGo) {
       h('p', { class: 'brief' }, m.brief),
       h('h4', {}, 'Your task'), h('p', {}, m.task),
       h('h4', {}, 'How you win'), h('ul', { class: 'clean' }, m.goals.map(g => h('li', {}, g.label)), (m.constraints || []).map(c => h('li', { class: 'muted' }, `Without breaking: ${c.label}`))),
+      app.coach.steps && app.settings.coach !== false ? h('div', { class: 'hintbox coachbrief' }, h('b', {}, 'COACH IS ON. '), `This incident is broken into ${app.coach.steps.length} small steps. The NEXT STEP card (top left) says what to do and where; an orange marker points at the place; each step is explained when you finish it. You can turn the coach off in Settings.`) : null,
       h('p', { class: 'muted', style: { fontSize: '12.5px' } }, 'The simulator checks real behaviour (does traffic actually flow?), not a specific command. Any correct fix works. After the fix you must verify it from where users are.'),
       h('div', { class: 'tags' }, m.objectives.map(o => h('span', { class: 'tag', title: objTitle(o) }, h('b', {}, o), ' ', objTitle(o).split(' (')[0])))),
     h('div', { class: 'ft' }, h('button', { class: 'btn primary', onclick: () => { ov.remove(); onGo(); } }, 'Start incident →')));
@@ -221,6 +222,7 @@ export function settingsCard(app) {
         h('label', {}, 'Graphics quality'), seg('quality', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], true),
         h('label', {}, 'Mouse sensitivity'), range('sensitivity', 0.3, 2.5, 0.05),
         h('label', {}, 'Invert look Y'), seg('invertY', [[false, 'Off'], [true, 'On']]),
+        h('label', {}, 'Step-by-step coach (incidents 1–4)'), seg('coach', [[true, 'On'], [false, 'Off']]),
         h('label', {}, 'Trainer notes (campaign)'), seg('trainerNotes', [[true, 'On'], [false, 'Off']]),
         h('label', {}, 'Sound volume'), range('volume', 0, 1, 0.05),
         h('label', {}, 'Unlock all incidents'), seg('unlockAll', [[false, 'No'], [true, 'Yes']]),

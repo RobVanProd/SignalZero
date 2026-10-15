@@ -52,6 +52,7 @@ export class MapWindow {
 
   show(k) {
     this.tabName = k;
+    this.app.coach?.noteOpen(`map:${k}`);
     for (const [n, b] of Object.entries(this.tabBtns)) b.classList.toggle('on', n === k);
     clear(this.body);
     if (k === 'topology') this.topology();
@@ -68,7 +69,9 @@ export class MapWindow {
     const st = eng.s;
     const devs = Object.values(st.devices).filter(d => d.powered !== false);
     const svg = s('svg', { viewBox: '0 40 820 620', role: 'img', 'aria-label': 'network topology' });
-    const pos = d => [d.map?.x ?? 400, d.map?.y ?? 300];
+    // offsite services fan out under INTERNET so their boxes (116 px wide) never overlap
+    const OFFSITE = { BACKUP: [60, 330], PORTAL: [180, 330], RESOLVER: [60, 420], 'SIP-GW': [180, 420] };
+    const pos = d => OFFSITE[d.id] || [d.map?.x ?? 400, d.map?.y ?? 300];
     const storms = new Set();
     for (const [, set] of eng.storms()) for (const id of set) storms.add(id);
     for (const l of Object.values(st.links)) {
@@ -91,7 +94,7 @@ export class MapWindow {
       g.addEventListener('click', () => { this.sel = d.id; this.show('topology'); });
       svg.append(g);
     }
-    this.body.append(h('div', { class: 'map-svg' }, svg), h('div', { class: 'muted', style: { padding: '0 14px 10px', fontSize: '12px' } }, 'Solid cyan = link up · red dashed = down · amber = duplex mismatch · flashing red = loop. Click a device for details.'));
+    this.body.append(h('div', { class: 'map-svg' }, svg), h('div', { class: 'muted', style: { padding: '0 14px 10px', fontSize: '12px' } }, 'Solid blue = link up · red dashed = down · amber dashed = duplex mismatch · flashing red = loop. Red box = a user on that device has a broken service. Click a device for details.'));
   }
 
   ipam() {
