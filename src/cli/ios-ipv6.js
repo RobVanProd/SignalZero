@@ -19,7 +19,7 @@ export function addIpv6Grammar(g) {
     ipv6: 'IPv6 configuration commands', 'unicast-routing': 'Enable unicast routing', 'eui-64': 'Use eui-64 interface identifier', 'link-local': 'Use link-local address',
     nd: 'IPv6 interface Neighbor Discovery subcommands', ra: 'Router Advertisement control', suppress: 'Suppress IPv6 Router Advertisements', all: 'Suppress all IPv6 RA',
     'traffic-filter': 'Access control list for packets', sequence: 'Sequence number for this entry', cef: 'Cisco Express Forwarding for IPv6',
-    local: 'Local routes', connected: 'Connected', static: 'Static routes', dns: 'Set DNS server for RA', protocols: 'IPv6 Routing Protocols', traffic: 'IPv6 traffic statistics',
+    local: 'Local routes', connected: 'Connected', static: 'Static routes', dns: 'Set DNS server for RA', traffic: 'IPv6 traffic statistics',
   };
   for (const [k, v] of Object.entries(help)) if (!(k in g.help)) g.help[k] = v;
   const ex = ['user', 'exec'];
