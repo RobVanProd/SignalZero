@@ -1,15 +1,17 @@
 // "Packet capture" view: the exact path the engine computed for the last command, hop by hop.
 // In Night Shift challenges the trainer explanations are withheld: you see where it stopped, not why.
 import { h, clear } from './dom.js';
-import { fmtIp } from '../engine/ipv4.js';
+import { fmtAddr } from '../engine/ipv6.js';
 import { longIf } from '../engine/model.js';
 
 function hostname(app, id) { return app.eng.s.devices[id]?.hostname || id; }
 
 function pktLine(p) {
   if (!p) return '';
-  const ports = p.proto === 'icmp' ? `ICMP ${p.icmpType || 'echo'}` : `${p.proto.toUpperCase()} ${p.sport} → ${p.dport}`;
-  return `${fmtIp(p.src ?? 0)} → ${fmtIp(p.dst)}  ${ports}  TTL ${p.ttl}`;
+  const v6 = typeof p.dst === 'string';
+  const icmp = p.proto === 'icmp' || p.proto === 'icmpv6';
+  const what = icmp ? `${v6 ? 'ICMPv6' : 'ICMP'} ${p.icmpType || 'echo'}` : `${p.proto.toUpperCase()} ${p.sport} → ${p.dport}`;
+  return `${p.src === null || p.src === undefined ? (v6 ? '::' : '0.0.0.0') : fmtAddr(p.src)} → ${fmtAddr(p.dst)}  ${what}  ${v6 ? 'Hop limit' : 'TTL'} ${p.ttl}`;
 }
 
 function hopList(app, hops, label, withNotes, notes, outcome) {
@@ -39,9 +41,11 @@ function describeFwd(app, fwd) {
   const at = hostname(app, fwd.at);
   switch (fwd.outcome) {
     case 'delivered': return { ok: true, text: `Delivered to ${at} (${{ echo: 'ICMP echo answered', 'tcp-open': 'TCP port open', 'tcp-refused': 'TCP reset: nothing listening', 'udp-open': 'UDP service answered', 'udp-closed': 'UDP port closed', 'filtered-host': 'host firewall dropped it' }[fwd.service] || fwd.service})` };
-    case 'ttl-exceeded': return { ok: true, text: `TTL expired at ${at} (traceroute probe)` };
-    case 'net-unreachable': return { ok: false, text: `${at}: no route — ICMP net unreachable sent back`, why: fwd.reason };
-    case 'local-error': return { ok: false, text: `${at} could not send`, why: { 'no-address': 'no IPv4 address', 'no-route': 'no route / no default gateway', 'arp-fail': 'ARP for the next hop got no answer', 'media-disconnected': 'cable unplugged / link down', 'gateway-off-link': 'gateway is not in the local subnet' }[fwd.reason] || fwd.reason };
+    case 'ttl-exceeded': return { ok: true, text: `${typeof fwd.pkt?.dst === 'string' ? 'Hop limit' : 'TTL'} expired at ${at} (traceroute probe)` };
+    case 'net-unreachable': return { ok: false, text: `${at}: no route — ${typeof fwd.pkt?.dst === 'string' ? 'ICMPv6 destination unreachable (no route)' : 'ICMP net unreachable'} sent back`, why: fwd.reason };
+    case 'addr-unreachable': return { ok: false, text: `${at}: neighbor discovery for the destination got no answer — ICMPv6 address unreachable sent back`, why: fwd.reason };
+    case 'scope-unreachable': return { ok: false, text: `${at}: a link-local address cannot be routed to another link — ICMPv6 beyond scope`, why: fwd.reason };
+    case 'local-error': return { ok: false, text: `${at} could not send`, why: { 'no-address': 'no address of this family', 'no-route': 'no route / no default gateway', 'arp-fail': 'ARP for the next hop got no answer', 'nd-fail': 'neighbor discovery for the next hop got no answer', 'media-disconnected': 'cable unplugged / link down', 'gateway-off-link': 'gateway is not in the local subnet', 'not-an-ip-device': 'this device does not send IP packets' }[fwd.reason] || fwd.reason };
     default: return { ok: false, text: `Dropped at ${at}`, why: fwd.reason };
   }
 }

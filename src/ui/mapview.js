@@ -2,6 +2,8 @@
 import { h, clear, overlay } from './dom.js';
 import { fmtIp, fmtMask } from '../engine/ipv4.js';
 import { hostAddr, l3Ifaces } from '../engine/routing.js';
+import { l3Ifaces6 } from '../engine/net6.js';
+import { fmtIp6 } from '../engine/ipv6.js';
 import { STATIONS } from '../world/layout.js';
 import { net } from '../content/district.js';
 import { wallClock } from '../engine/engine.js';
@@ -29,6 +31,9 @@ export function ipamRows(p, eng) {
     { what: 'CCTV-NVR', subnet: net(p, 'clinic', 30), gw: '', notes: 'RTSP ingest TCP 554' },
     { what: 'CLINIC-OLD', subnet: net(p, 'clinic', 99), gw: '', notes: 'DECOMMISSIONED 2026-10-01. Still powered, pending removal.' },
     { what: 'Public DNS', subnet: '203.0.113.53', gw: '', notes: 'resolver.example.net (forwarder)' },
+    { what: 'IPv6 site prefix', subnet: `2001:db8:${p.site}::/48`, gw: '', notes: 'Delegated by the ISP and routed to EDGE-RTR (no NAT for IPv6). One /64 per VLAN: 2001:db8:' + p.site + ':<vlan>::/64.' },
+    { what: `IPv6 VLAN ${p.vlans.clinic} CLINIC`, subnet: `2001:db8:${p.site}:${p.vlans.clinic}::/64`, gw: `2001:db8:${p.site}:${p.vlans.clinic}::1`, notes: 'SLAAC from router advertisements (hosts use the router\'s link-local address as gateway)' },
+    { what: 'IPv6 WAN', subnet: '2001:db8:ffff:1::/64', gw: '2001:db8:ffff:1::1 (ISP)', notes: 'EDGE-RTR Gi0/0 = ::2' },
   ];
 }
 
@@ -140,6 +145,8 @@ export class MapWindow {
     side.append(h('h5', {}, d.kind.toUpperCase()), h('div', { style: { fontWeight: 800, fontSize: '16px' } }, d.hostname), h('p', { class: 'muted', style: { fontSize: '12.5px' } }, d.role || ''));
     const ifs = l3Ifaces(app.eng, d);
     if (ifs.length) side.append(h('h5', {}, 'L3 INTERFACES'), h('table', { class: 'table' }, h('tbody', {}, ifs.map(i => h('tr', {}, h('td', { class: 'mono' }, i.name), h('td', { class: 'mono' }, `${fmtIp(i.addr)}/${i.len}`), h('td', {}, i.up ? 'up' : 'down'))))));
+    const ifs6 = l3Ifaces6(app.eng, d).filter(i => i.addrs.length || i.ll);
+    if (ifs6.length) side.append(h('h5', {}, 'IPv6'), h('table', { class: 'table' }, h('tbody', {}, ifs6.flatMap(i => [i.ll ? { name: i.name, a: `${fmtIp6(i.ll)} (link-local)` } : null, ...i.addrs.map(a => ({ name: i.name, a: `${fmtIp6(a.addr)}/${a.len}` }))].filter(Boolean).map(r => h('tr', {}, h('td', { class: 'mono' }, r.name), h('td', { class: 'mono', style: { wordBreak: 'break-all' } }, r.a)))))));
     const st = STATIONS.find(x => x.dev === d.id || x.id === d.id);
     if (st) side.append(h('button', { class: 'btn small', style: { marginTop: '10px' }, onclick: () => { app.closeOverlay(); app.travelTo(st.id); } }, 'Go to this device'));
     void fmtMask;

@@ -5,6 +5,8 @@ import { createSession, execute, complete, prompt as promptOf } from '../cli/ind
 import { renderCapture } from './capture.js';
 import { fmtIp } from '../engine/ipv4.js';
 import { hostAddr } from '../engine/routing.js';
+import { hostAddr6 } from '../engine/net6.js';
+import { fmtIp6 } from '../engine/ipv6.js';
 
 const QUICK = {
   ios: { router: ['enable', 'show ip interface brief', 'show ip route', 'show running-config', 'show access-lists', 'show ip nat translations', 'show interfaces g0/1', 'show logging', 'show cdp neighbors', 'configure terminal'],
@@ -68,7 +70,18 @@ export class TerminalWindow {
     const app = this.app;
     if (d.os === 'ios') c.lines.push({ t: 'out', text: `\n${d.hostname} con0 is now available\n\nPress RETURN to get started.\n` });
     else if (d.os === 'windows') c.lines.push({ t: 'out', text: 'Microsoft Windows [Version 10.0.26100.2033]\n(c) Microsoft Corporation. All rights reserved.\n' });
-    else c.lines.push({ t: 'out', text: `Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-45-generic x86_64)\n\n  System load:  0.04   Users logged in: 1   IPv4 for ${d.nic}: ${(() => { const a = hostAddr(app.eng, d); return a.addr !== null ? fmtIp(a.addr) : '-'; })()}\n\nLast login: Thu Oct 15 01:12:44 2026 from 10.0.0.5\n` });
+    else {
+      // landscape-sysinfo layout from the Ubuntu 24.04 MOTD
+      const a = hostAddr(app.eng, d);
+      const g6 = hostAddr6(app.eng, d).addrs?.[0];
+      const L = ['Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-45-generic x86_64)', '',
+        `  System load:  0.04              Processes:             118`,
+        `  Usage of /:   23.1% of 38.58GB   Users logged in:       1`,
+        `  Memory usage: 21%               IPv4 address for ${d.nic}: ${a.addr !== null ? fmtIp(a.addr) : '-'}`,
+        `  Swap usage:   0%${g6 ? `                IPv6 address for ${d.nic}: ${fmtIp6(g6.addr)}` : ''}`,
+        '', 'Last login: Thu Oct 15 01:12:44 2026 from 10.0.0.5', ''];
+      c.lines.push({ t: 'out', text: L.join('\n') });
+    }
     if (app.trainerNotes) c.lines.push({ t: 'note', text: d.os === 'ios' ? 'Cisco-style CLI. Start with "enable", then "show …" commands. "?" lists options, Tab completes, abbreviations like "sh ip int br" work.' : d.os === 'windows' ? 'Windows command prompt. Type help for the supported commands.' : 'Ubuntu server shell (you are root). Type help for supported commands.' });
   }
 
