@@ -536,6 +536,7 @@ export const MISSIONS = [
 export const ACTS = [
   { id: 0, title: 'ACT 0 · FIRST LIGHT', blurb: 'Five latent faults, one district. Each fix reveals the next layer.' },
   { id: 1, title: 'ACT I · GROWING PAINS', blurb: 'Sector B comes online: loops, relays, subnets, physics and an intruder.' },
+  { id: 2, title: 'ACT II · NEW GROUND', blurb: 'The district grows: IPv6, a branch clinic with dynamic routing, a crowded lobby, encrypted tunnels and staff working from home.' },
 ];
 
 /** Build the canonical start state for mission index i (earlier missions solved by reference). */
