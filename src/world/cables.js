@@ -5,6 +5,9 @@ import { routeBetween, PLACES } from './layout.js';
 import { PATCH_PANEL } from '../content/district.js';
 
 const OFFSITE = new Set(['ISP-PE', 'INTERNET', 'BACKUP', 'PORTAL', 'RESOLVER', 'SIP-GW']);
+// Devices outside the building (the internet, the branch clinic, a home office) are drawn as the sky link.
+const OFFSITE_ZONES = new Set(['offsite', 'branch', 'home']);
+const isOffsite = (st, id) => OFFSITE.has(id) || OFFSITE_ZONES.has(st.devices[id]?.zone);
 const CORD_COLORS = { 'P01-P04': 0x1f7bff, 'P07-P09': 0xffd23f, 'P08-P10': 0xffd23f };
 
 function anchorFor(anchors, dev, port) {
@@ -83,7 +86,7 @@ export class Cables {
       let idx = 0;
       for (const id of ids) {
         const link = st.links[id];
-        const built = this.buildLink(link, idx++);
+        const built = this.buildLink(link, idx++, st);
         if (!built) continue;
         this.links.set(id, built);
         if (built.mesh) {
@@ -109,11 +112,11 @@ export class Cables {
     }
   }
 
-  buildLink(link, index) {
+  buildLink(link, index, st) {
     const a = link.a;
     const b = link.b;
-    const offA = OFFSITE.has(a.dev);
-    const offB = OFFSITE.has(b.dev);
+    const offA = isOffsite(st, a.dev);
+    const offB = isOffsite(st, b.dev);
     if (offA && offB) return { kind: 'sky', curve: this.skyCurve, length: this.skyLen };
     if (link.media === 'wifi') {
       const pa = anchorFor(this.anchors, a.dev, a.port)?.p;
@@ -185,7 +188,7 @@ export class Cables {
       if (l.kind === 'sky') {
         if (lastSky) continue;
         lastSky = true;
-        const outbound = !OFFSITE.has(h.from.dev) || h.to.dev === 'INTERNET' || ['ISP-PE'].includes(h.from.dev);
+        const outbound = !isOffsite(eng.s, h.from.dev) || h.to.dev === 'INTERNET' || ['ISP-PE'].includes(h.from.dev);
         segs.push({ curve: l.curve, length: l.length, rev: !outbound, sky: true });
         continue;
       }

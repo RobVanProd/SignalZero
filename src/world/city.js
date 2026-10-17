@@ -11,6 +11,7 @@ export const DISTRICTS = {
   public: { x0: 60, x1: 200, color: 0xb9f1ff, label: 'Public' },
   security: { x0: 200, x1: 340, color: 0xa8ffd8, label: 'Security' },
   voice: { x0: 340, x1: 560, color: 0xffc7a0, label: 'Voice' },
+  branch: { x0: 560, x1: 900, color: 0xffe4b0, label: 'Branch' },
 };
 
 // Printed sky: flat ink bands with halftone between them and a sodium light-pollution band on the horizon.
