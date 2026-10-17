@@ -5,6 +5,8 @@ import { parseZone, zoneLoadFailure } from './parsers/zone.js';
 import { hostAddr, l3Ifaces, evalAcl } from './routing.js';
 import { sendPacket, probe } from './trace.js';
 import { macLinux } from './model.js';
+import { parseIp6, isGlobal6 } from './ipv6.js';
+import { hostAddr6, hostV6Enabled, v6Usable } from './net6.js';
 
 // ------------------------------------------------------------------ DHCP server (ISC dhcpd 4.4 behaviour)
 
@@ -622,7 +624,10 @@ export function serverAnswer(eng, server, qname, qtype = 'A', depth = 0) {
   qname = qname.toLowerCase().replace(/\.$/, '');
   if (server.services['public-dns']?.active) {
     const rec = eng.s.internet.names[qname];
-    if (!rec) return { rcode: 'NXDOMAIN', answers: [], aa: false };
+    const rec6 = eng.s.internet.names6?.[qname]; // ---- ipv6: AAAA records
+    if (!rec && !rec6) return { rcode: 'NXDOMAIN', answers: [], aa: false };
+    if (qtype === 'AAAA') return { rcode: 'NOERROR', answers: rec6 ? [{ name: qname, type: 'AAAA', ttl: 300, addr6: parseIp6(rec6) }] : [], aa: false };
+    if (!rec) return { rcode: 'NOERROR', answers: [], aa: false }; // the name exists, but has no A record (NODATA)
     return { rcode: 'NOERROR', answers: [{ name: qname, type: 'A', ttl: 300, addr: parseIp(rec) }], aa: false };
   }
   const svc = server.services.named;
@@ -643,7 +648,7 @@ export function serverAnswer(eng, server, qname, qtype = 'A', depth = 0) {
         if (zoneFor(svc, name) !== z) break;
         continue;
       }
-      for (const r of here.filter(r => r.type === qtype)) answers.push({ name, type: r.type, ttl: r.ttl, addr: r.addr, target: r.target, pref: r.pref, text: r.text });
+      for (const r of here.filter(r => r.type === qtype)) answers.push({ name, type: r.type, ttl: r.ttl, addr: r.addr, addr6: r.addr6, target: r.target, pref: r.pref, text: r.text });
       return { rcode: 'NOERROR', answers, aa: true };
     }
     if (answers.length && depth < 3) {
@@ -706,41 +711,158 @@ export function resolveName(eng, client, name, opts = {}) {
   return { ok: false, error: refused ? 'refused' : 'timeout', qname, tried, serverIp: servers[0] };
 }
 
+// ---- ipv6: AAAA lookups and getaddrinfo-style address lists
+
+/** Windows' resolver cache entry for AAAA answers (kept beside the A entry so A behaviour is unchanged). */
+export const aaaaKey = qname => `${qname}#AAAA`;
+
+/**
+ * AAAA lookup (RFC 3596). Same transport and server order as resolveName (the clinic's DNS servers are reached over
+ * IPv4, which is how a dual-stack client gets AAAA answers without RDNSS/DHCPv6). The query's source port is fixed so
+ * that adding the AAAA query never shifts the engine's random stream.
+ * Returns { ok, addrs, rcode, serverIp, server, answers, aa, qname, tried, error, fromCache, literal }
+ */
+export function resolveName6(eng, client, name, opts = {}) {
+  let qname = name.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  const lit = parseIp6(qname.split('%')[0]);
+  if (lit !== null) return { ok: true, addrs: [lit], literal: true, qname };
+  const a = hostAddr(eng, client);
+  if (!qname.includes('.') && a.domain) qname = `${qname}.${a.domain}`;
+  if (opts.useCache) {
+    const c = client.dnsCache?.[aaaaKey(qname)];
+    if (c && c.expires > eng.s.t) return { ok: true, addrs: c.addrs, fromCache: true, qname, ttlLeft: Math.round(c.expires - eng.s.t) };
+  }
+  const servers = opts.server !== undefined ? [opts.server] : (a.dns || []);
+  if (!servers.length) return { ok: false, error: 'no-dns-servers', qname };
+  const tried = [];
+  for (const srvIp of servers) {
+    const p = probe(eng, { from: client.id, dst: srvIp, proto: 'udp', dport: 53, sport: 50053 });
+    tried.push({ ip: srvIp, status: p.status, kind: p.kind, probe: p });
+    if (p.status !== 'ok' || p.kind !== 'udp-reply') continue;
+    const server = eng.s.devices[p.fwd.at];
+    const ans = serverAnswer(eng, server, qname, 'AAAA');
+    if (ans.rcode === 'NOSERVICE') continue;
+    const recs = ans.answers.filter(x => x.type === 'AAAA' && x.addr6);
+    if (ans.rcode === 'NOERROR' && recs.length) {
+      const addrs = recs.map(x => x.addr6);
+      if (opts.useCache && client.dnsCache) client.dnsCache[aaaaKey(qname)] = { type: 'AAAA', addrs, expires: eng.s.t + recs[0].ttl, ttl: recs[0].ttl };
+      return { ok: true, addrs, rcode: 'NOERROR', serverIp: srvIp, server, answers: ans.answers, aa: ans.aa, qname, tried, probe: p };
+    }
+    return { ok: false, rcode: ans.rcode, error: ans.rcode.toLowerCase(), serverIp: srvIp, server, answers: ans.answers, aa: ans.aa, qname, tried, probe: p };
+  }
+  const refused = tried.every(t => t.status === 'ok' && t.kind === 'port-unreachable');
+  return { ok: false, error: refused ? 'refused' : 'timeout', qname, tried, serverIp: servers[0] };
+}
+
+/**
+ * Does this client's stub resolver send an AAAA query alongside the A query?
+ *  - Windows DNS Client: only when the host has an IPv6 address that is neither link-local nor Teredo, and not when
+ *    the A query timed out or failed (Microsoft, "DNS Client Behavior in Windows Vista").
+ *  - Linux (glibc getaddrinfo with AF_UNSPEC, as curl, ping and traceroute call it): whenever IPv6 is enabled; glibc
+ *    still asks for AAAA when the host has only link-local addresses (sourceware bug 12377).
+ */
+export function asksAaaa(eng, client, r4) {
+  if (!hostV6Enabled(client)) return false;
+  if (client.os === 'windows') {
+    if (!hostAddr6(eng, client).addrs.some(x => isGlobal6(x.addr))) return false;
+    if (r4 && !r4.ok && r4.rcode !== 'NOERROR') return false;
+    return true;
+  }
+  return true;
+}
+
+/**
+ * getaddrinfo() for a client: A and (when the OS asks) AAAA answers, sorted the RFC 6724 way (simplified):
+ * IPv6 first only when the host has a global IPv6 source address and a route to the destination (rule 1 "avoid
+ * unusable destinations", rule 2 "prefer matching scope"); otherwise IPv4 first.
+ * opts.family 4 | 6 restricts it (ping -4/-6, curl -4/-6). Returns
+ * { ok, qname, order:[{family, addr}], v4, v6, r4, r6, error, rcode, literal }
+ */
+export function lookupHost(eng, client, name, opts = {}) {
+  const fam = opts.family;
+  const bare = name.replace(/^\[|\]$/g, '');
+  const lit4 = parseIp(bare);
+  const lit6 = parseIp6(bare.split('%')[0]);
+  if (lit4 !== null || lit6 !== null) {
+    const order = lit4 !== null ? [{ family: 4, addr: lit4 }] : [{ family: 6, addr: lit6, zone: bare.includes('%') ? bare.split('%')[1] : null }];
+    const ok = !fam || order[0].family === fam;
+    return { ok, literal: true, qname: bare, order: ok ? order : [], v4: lit4 !== null ? [lit4] : [], v6: lit6 !== null ? [lit6] : [], error: ok ? null : 'family' };
+  }
+  const r4 = fam === 6 ? null : resolveName(eng, client, name, { useCache: opts.useCache });
+  const r6 = fam === 4 ? null : (fam === 6 || asksAaaa(eng, client, r4)) ? resolveName6(eng, client, name, { useCache: opts.useCache }) : null;
+  const v4 = r4?.ok ? [r4.addr] : [];
+  const v6 = r6?.ok ? r6.addrs : [];
+  const l4 = v4.map(addr => ({ family: 4, addr }));
+  const l6 = v6.map(addr => ({ family: 6, addr }));
+  const v6First = l6.length && (!l4.length || v6Usable(eng, client, l6[0].addr));
+  const order = v6First ? [...l6, ...l4] : [...l4, ...l6];
+  const primary = r4 ?? r6;
+  return { ok: order.length > 0, qname: primary?.qname ?? name, order, v4, v6, r4, r6, error: order.length ? null : (r4?.error ?? r6?.error), rcode: r4?.rcode ?? r6?.rcode, fromCache: !!(r4?.fromCache || r6?.fromCache) };
+}
+
 // ------------------------------------------------------------------ HTTP(S)
 
 export function parseUrl(url) {
-  const m = /^(https?):\/\/([^/:\s]+)(?::(\d+))?(\/[^\s]*)?$/i.exec(url.trim());
+  const m = /^(https?):\/\/(\[[0-9a-fA-F:.]+\]|[^/:\s[\]]+)(?::(\d+))?(\/[^\s]*)?$/i.exec(url.trim());
   if (!m) return null;
   const scheme = m[1].toLowerCase();
+  // ---- ipv6: a literal address in a URL is written in brackets (RFC 3986 3.2.2)
+  if (m[2].startsWith('[') && parseIp6(m[2]) === null) return null;
   return { scheme, host: m[2].toLowerCase(), port: m[3] ? Number(m[3]) : scheme === 'https' ? 443 : 80, path: m[4] || '/' };
 }
 
 /**
  * Perform an HTTP(S) request from a client.
- * Returns { stage, ok, status, headers, body, error:{code,msg}, ip, resolve, connect, tls }
+ * Returns { stage, ok, status, headers, body, error:{code,msg}, ip, family, resolve, connect, tls, attempts }
  * stage: 'resolve' | 'connect' | 'tls' | 'http'
+ * Dual stack (curl's "Happy Eyeballs", RFC 8305): the first address family in getaddrinfo order is tried first; if that
+ * connection fails (at once or after curl's 200 ms head start) the other family is tried. When both fail, curl reports
+ * the first family's error (lib/connect.c, "all eyeballers failed"). opts.family 4 | 6 = curl -4 / -6.
  */
 export function httpRequest(eng, client, url, opts = {}) {
   const u = parseUrl(url);
   if (!u) return { stage: 'parse', ok: false, error: { code: 3, msg: 'URL rejected: Malformed input to a URL function' } };
-  const res = resolveName(eng, client, u.host, { useCache: client.os === 'windows' && !opts.noCache });
-  if (!res.ok) return { stage: 'resolve', ok: false, url: u, resolve: res, error: { code: 6, msg: `Could not resolve host: ${u.host}` } };
-  const ip = res.addr;
-  const p = probe(eng, { from: client.id, dst: ip, proto: 'tcp', dport: u.port, sport: 51000 + Math.floor(eng.rand() * 9000), record: true });
-  const base = { url: u, ip, resolve: res, connect: p };
-  if (p.status === 'local-error') return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Failed to connect', local: p.reason } };
-  if (p.status === 'timeout') return { ...base, stage: 'connect', ok: false, error: { code: 28, msg: 'Timed out' } };
-  if (p.kind === 'rst') return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Could not connect to server', refused: true } };
-  if (p.kind !== 'syn-ack') return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Could not connect to server' } };
+  const look = lookupHost(eng, client, u.host, { useCache: client.os === 'windows' && !opts.noCache, family: opts.family });
+  const res = look.literal ? { ok: look.ok, addr: look.order[0]?.addr, literal: true, qname: look.qname } : (look.r4 ?? look.r6);
+  if (!look.ok) return { stage: 'resolve', ok: false, url: u, resolve: res, lookup: look, error: { code: 6, msg: `Could not resolve host: ${u.host}` } };
+  const families = [];
+  for (const o of look.order) if (!families.some(f => f.family === o.family)) families.push(o);
+  const attempts = [];
+  let p = null;
+  let win = null;
+  for (let i = 0; i < families.length; i++) {
+    const { family, addr } = families[i];
+    // The first attempt draws its source port exactly as before; a fallback attempt uses the next port.
+    const sport = i === 0 ? 51000 + Math.floor(eng.rand() * 9000) : attempts[0].sport + 1;
+    const pr = probe(eng, { from: client.id, dst: addr, proto: 'tcp', dport: u.port, sport, record: true });
+    const ok = pr.status === 'ok' && pr.kind === 'syn-ack';
+    attempts.push({ family, addr, sport, probe: pr, ok });
+    if (!p) p = pr;
+    if (ok) { win = attempts[attempts.length - 1]; p = pr; break; }
+  }
+  const first = attempts[0];
+  const ip = win ? win.addr : first.addr;
+  const base = { url: u, ip, family: win ? win.family : first.family, resolve: res, lookup: look, connect: p, attempts };
+  if (!win) {
+    // all eyeballers failed: curl reports the first family's error
+    const fp = first.probe;
+    if (fp.status === 'local-error') return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Failed to connect', local: fp.reason } };
+    if (fp.status === 'timeout') return { ...base, stage: 'connect', ok: false, error: { code: 28, msg: 'Timed out' } };
+    if (fp.kind === 'rst') return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Could not connect to server', refused: true } };
+    return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Could not connect to server', unreachable: fp.kind } };
+  }
   // loss on a degraded path can still break the session
   if (p.pass < 0.25 && eng.rand() > p.pass * 2) return { ...base, stage: 'http', ok: false, error: { code: 56, msg: 'Recv failure: Connection was reset' } };
   const server = eng.s.devices[p.fwd.at];
-  const web = Object.values(server.services).find(s => s.kind === 'web' && s.active && s.listen.some(l => l.port === u.port));
+  const fam = win.family;
+  const famOk = site => !site.family || site.family === fam;
+  const web = Object.values(server.services).find(s => s.kind === 'web' && s.active && s.listen.some(l => l.port === u.port && (!l.family || l.family === fam)));
   if (!web) return { ...base, stage: 'connect', ok: false, error: { code: 7, msg: 'Could not connect to server' } };
-  const site = web.sites.find(s => s.names.includes(u.host)) || web.sites.find(s => s.default) || web.sites[0];
+  const host = u.host.replace(/^\[|\]$/g, '');
+  const site = web.sites.find(s => s.names.includes(host) && famOk(s)) || web.sites.find(s => s.default && famOk(s)) || web.sites.find(famOk) || web.sites[0];
   if (u.scheme === 'https') {
     const names = site.cert?.names || [];
-    const okName = names.some(n => n === u.host || (n.startsWith('*.') && u.host.endsWith(n.slice(1)) && u.host.split('.').length === n.split('.').length));
+    const okName = names.some(n => n === host || (n.startsWith('*.') && host.endsWith(n.slice(1)) && host.split('.').length === n.split('.').length));
     if (!okName && !opts.insecure) return { ...base, stage: 'tls', ok: false, server, site, error: { code: 60, msg: 'certificate name mismatch', certNames: names } };
   }
   const route = site.routes?.[u.path] || site.routes?.['*'] || { status: 404, body: '<html><head><title>404 Not Found</title></head></html>', type: 'text/html' };

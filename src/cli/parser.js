@@ -3,6 +3,7 @@
 //   'show interfaces <IF>'   'ip route <IP> <MASK> <NH>'   'description <LINE>'
 import { parseIp, maskToPrefix, parseRangeList } from '../engine/ipv4.js';
 import { canonIf } from '../engine/model.js';
+import { parseIp6, parseCidr6 } from '../engine/ipv6.js';
 
 export const ARG_TYPES = {
   IP: { help: 'A.B.C.D', parse: t => parseIp(t) },
@@ -15,6 +16,10 @@ export const ARG_TYPES = {
   WORD: { help: 'WORD', parse: t => t },
   LINE: { help: 'LINE  Up to 240 characters', parse: t => t, rest: true },
   NH: { help: 'A.B.C.D  Forwarding router\'s address | Interface', parse: t => parseIp(t) ?? canonIf(t) },
+  // ---- ipv6
+  IP6: { help: 'X:X:X:X::X  IPv6 address', parse: t => (t.includes(':') ? parseIp6(t) : null) },
+  PFX6: { help: 'X:X:X:X::X/<0-128>  IPv6 prefix', parse: t => (t.includes(':') ? parseCidr6(t) : null) },
+  NH6: { help: 'X:X:X:X::X  IPv6 address of next-hop | Interface', parse: t => (t.includes(':') ? parseIp6(t) : canonIf(t)) },
 };
 
 export function tokenize(line) {
@@ -27,7 +32,7 @@ export function tokenize(line) {
 
 function compile(template) {
   return template.split(/\s+/).map(w => {
-    const m = /^<([A-Z]+)(?::([a-z0-9]+))?>$/.exec(w);
+    const m = /^<([A-Z][A-Z0-9]*)(?::([a-z0-9]+))?>$/.exec(w);
     if (m) return { arg: m[1], name: m[2] || m[1].toLowerCase(), type: ARG_TYPES[m[1]] };
     return { kw: w.toLowerCase() };
   });

@@ -7,6 +7,11 @@ import { parseDhcpd } from '../engine/parsers/dhcpd.js';
 import { parseZone, checkzoneOutput } from '../engine/parsers/zone.js';
 import { wallClock } from '../engine/engine.js';
 import { parseNetplan, renderNetplan } from '../engine/parsers/netplan.js';
+// ---- ipv6
+import { fmtIp6, parseIp6, fmtAddr, isLinkLocal6 } from '../engine/ipv6.js';
+import { hostAddr6 } from '../engine/net6.js';
+import { lookupHost, resolveName6 } from '../engine/services.js';
+import { linuxInet6Lines, linuxRoute6, linuxNeigh6, LO_INET6 } from './host6.js';
 
 const UNITS = {
   'isc-dhcp-server': { svc: 'isc-dhcp-server', desc: 'ISC DHCP IPv4 server', docs: 'man:dhcpd(8)', proc: 'dhcpd' },
@@ -98,7 +103,7 @@ function fileText(eng, d, path) {
   }
   if (path === '/etc/netplan/01-netcfg.yaml' && !d.ipcfg.dhcp && d.files?.[path] === undefined) {
     d.files = d.files || {};
-    d.files[path] = renderNetplan(d.nic, d.ipcfg.static, fmtIp);
+    d.files[path] = renderNetplan(d.nic, d.ipcfg.static, fmtIp, d.ipcfg.static6);
   }
   if (path.startsWith('/etc/nginx/sites-enabled/')) {
     const web = Object.values(d.services || {}).find(s => s.kind === 'web');
@@ -127,15 +132,37 @@ function resolvePath(sess, p) {
   return '/' + parts.join('/');
 }
 
-function pingLinux(eng, d, args) {
+// ---- ipv6: getaddrinfo() for the iputils/traceroute tools: -4 / -6, IPv6 literals, RFC 6724 order for names.
+function pickLinux(eng, d, target, fam) {
+  const look = lookupHost(eng, d, target, { family: fam ?? undefined });
+  if (!look.ok) {
+    const r = look.r4 ?? look.r6 ?? {};
+    if (look.literal) return { ok: false, rcode: 'FAMILY' };
+    // NXDOMAIN, or the name exists with no address of the requested family ("No address associated with hostname")
+    return { ok: false, rcode: r.rcode, noAddr: r.rcode === 'NOERROR' };
+  }
+  const first = look.order[0];
+  return { ok: true, addr: first.addr, v6: first.family === 6, zone: first.zone ?? null };
+}
+
+function famArgs(args, cmd) {
+  let fam = cmd === 'ping6' || cmd === 'traceroute6' ? 6 : null;
+  const rest = [];
+  for (const a of args) { if (a === '-6') fam = 6; else if (a === '-4') fam = 4; else rest.push(a); }
+  return { fam, rest };
+}
+
+function pingLinux(eng, d, args0, cmd = 'ping') {
+  const { fam, rest: args } = famArgs(args0, cmd);
   let count = 4;
   const rest = [];
   for (let i = 0; i < args.length; i++) { if (args[i] === '-c') { count = Math.max(1, Math.min(20, Number(args[++i]) || 4)); continue; } rest.push(args[i]); }
   const target = rest[0];
   if (!target) return ['ping: usage error: Destination address required'];
   const lit = parseIp(target);
-  const res = lit !== null ? { ok: true, addr: lit } : resolveName(eng, d, target, {});
-  if (!res.ok) return [`ping: ${target}: ${res.rcode === 'NXDOMAIN' ? 'Name or service not known' : 'Temporary failure in name resolution'}`];
+  const res = lit !== null && fam !== 6 ? { ok: true, addr: lit } : pickLinux(eng, d, target, fam);
+  if (!res.ok) return [`ping: ${target}: ${res.rcode === 'FAMILY' ? 'Address family for hostname not supported' : res.noAddr ? 'No address associated with hostname' : res.rcode === 'NXDOMAIN' ? 'Name or service not known' : 'Temporary failure in name resolution'}`];
+  if (res.v6) return ping6Linux(eng, d, target, res, count);
   const ip = res.addr;
   const L = [`PING ${target} (${fmtIp(ip)}) 56(84) bytes of data.`];
   let ok = 0;
@@ -165,12 +192,62 @@ function pingLinux(eng, d, args) {
   return L;
 }
 
-function traceLinux(eng, d, args) {
+/** iputils ping over IPv6 (ping6_common.c wording: "56 data bytes", "Destination unreachable: No route", ...). */
+function ping6Linux(eng, d, target, res, count) {
+  const dst = res.addr;
+  const shown = `${fmtIp6(dst)}${res.zone ? `%${res.zone}` : ''}`;
+  const L = [`PING ${target} (${shown}) 56 data bytes`];
+  let ok = 0;
+  const rtts = [];
+  let errs = 0;
+  for (let i = 1; i <= count; i++) {
+    const r = eng.probe({ from: d.id, dst, proto: 'icmp', record: true, ...(isLinkLocal6(dst) ? { oif: d.nic } : {}) });
+    if (r.status === 'local-error') {
+      if (r.reason === 'nd-fail') { L.push(`From ${fmtIp6(r.fwd.pkt.src)} icmp_seq=${i} Destination unreachable: Address unreachable`); errs++; continue; }
+      return ['ping: connect: Network is unreachable'];
+    }
+    if (r.status !== 'ok' || eng.rand() > (r.pass ?? 1)) continue;
+    const why = { 'net-unreachable': 'Destination unreachable: No route', 'addr-unreachable': 'Destination unreachable: Address unreachable', 'scope-unreachable': 'Destination unreachable: Beyond scope of source address', 'port-unreachable': 'Destination unreachable: Port unreachable', 'ttl-exceeded': 'Time exceeded: Hop limit' }[r.kind];
+    if (why) { L.push(`From ${fmtIp6(r.responderIp)} icmp_seq=${i} ${why}`); errs++; continue; }
+    const ms = Math.max(0.05, r.rttMs + eng.rand() * (r.jitter || 0.1));
+    rtts.push(ms);
+    ok++;
+    L.push(`64 bytes from ${shown === fmtIp6(r.responderIp) ? shown : fmtIp6(r.responderIp)}: icmp_seq=${i} ttl=${r.ttl} time=${ms.toFixed(ms < 10 ? 3 : 1)} ms`);
+  }
+  L.push('', `--- ${target} ping statistics ---`, `${count} packets transmitted, ${ok} received,${errs ? ` +${errs} errors,` : ''} ${Math.round(((count - ok) / count) * 100)}% packet loss, time ${(count - 1) * 1001}ms`);
+  if (rtts.length) {
+    const avg = rtts.reduce((a, b) => a + b, 0) / rtts.length;
+    L.push(`rtt min/avg/max/mdev = ${Math.min(...rtts).toFixed(3)}/${avg.toFixed(3)}/${Math.max(...rtts).toFixed(3)}/${(Math.max(...rtts) - Math.min(...rtts)).toFixed(3)} ms`);
+  }
+  eng.event({ type: 'ping', host: d.id, target, ip: dst, ok: ok > 0, family: 6 });
+  return L;
+}
+
+function traceLinux(eng, d, args0, cmd = 'traceroute') {
+  const { fam, rest: args } = famArgs(args0, cmd);
   const target = args.find(a => !a.startsWith('-'));
   if (!target) return ['Usage: traceroute host'];
   const lit = parseIp(target);
-  const res = lit !== null ? { ok: true, addr: lit } : resolveName(eng, d, target, {});
-  if (!res.ok) return [`${target}: Name or service not known`, 'Cannot handle "host" cmdline arg `' + target + "' on position 1 (argc 1)"];
+  const res = lit !== null && fam !== 6 ? { ok: true, addr: lit } : pickLinux(eng, d, target, fam);
+  if (!res.ok) return [`${target}: ${res.noAddr ? 'No address associated with hostname' : 'Name or service not known'}`, 'Cannot handle "host" cmdline arg `' + target + "' on position 1 (argc 1)"];
+  if (res.v6) {
+    // ---- ipv6: traceroute 2.1 defaults to 80-byte packets for IPv6
+    const L = [`traceroute to ${target} (${fmtIp6(res.addr)}), 30 hops max, 80 byte packets`];
+    let miss = 0;
+    for (let ttl = 1; ttl <= 30; ttl++) {
+      const r = eng.probe({ from: d.id, dst: res.addr, proto: 'udp', dport: 33434 + ttl, ttl, record: true });
+      if (r.status === 'local-error') { L.push('connect: Network is unreachable'); break; }
+      if (r.status !== 'ok') { L.push(`${String(ttl).padStart(2)}  * * *`); if (++miss >= 3) { L.push({ t: 'note', text: 'trainer: later hops also time out; output shortened.' }); break; } continue; }
+      miss = 0;
+      const ms = () => (r.rttMs + eng.rand() * 0.3).toFixed(3);
+      const tag = r.kind === 'net-unreachable' ? ' !N' : r.kind === 'addr-unreachable' ? ' !H' : r.kind === 'scope-unreachable' ? ' !S' : '';
+      const a = fmtIp6(r.responderIp);
+      L.push(`${String(ttl).padStart(2)}  ${a} (${a})  ${ms()} ms${tag}  ${ms()} ms${tag}  ${ms()} ms${tag}`);
+      if (r.kind !== 'ttl-exceeded') break;
+    }
+    eng.event({ type: 'trace', host: d.id, target, ip: res.addr, family: 6 });
+    return L;
+  }
   const L = [`traceroute to ${target} (${fmtIp(res.addr)}), 30 hops max, 60 byte packets`];
   let miss = 0;
   for (let ttl = 1; ttl <= 30; ttl++) {
@@ -192,7 +269,7 @@ function digCmd(eng, d, args) {
   let type = 'A';
   let name;
   for (const a of args) {
-    if (a.startsWith('@')) server = parseIp(a.slice(1));
+    if (a.startsWith('@')) server = parseIp(a.slice(1)) ?? parseIp6(a.slice(1)) ?? null; // ---- ipv6: @2001:db8::53
     else if (a === '+short') short = true;
     else if (/^(A|NS|SOA|CNAME|MX|TXT|PTR|AAAA)$/i.test(a)) type = a.toUpperCase();
     else if (!a.startsWith('+') && !a.startsWith('-')) name = a;
@@ -204,20 +281,21 @@ function digCmd(eng, d, args) {
   const w = wallClock(eng.s.t);
   if (r.error === 'timeout' || r.error === 'refused') {
     eng.event({ type: 'dns', host: d.id, name, ok: false, error: r.error });
-    const why = `;; communications error to ${fmtIp(srv)}#53: ${r.error === 'refused' ? 'connection refused' : 'timed out'}`;
+    const why = `;; communications error to ${fmtAddr(srv)}#53: ${r.error === 'refused' ? 'connection refused' : 'timed out'}`;
     return [why, why, why, '', `; <<>> DiG 9.18.28-0ubuntu0.24.04.1-Ubuntu <<>> ${args.join(' ')}`, ';; global options: +cmd', ';; no servers could be reached'];
   }
-  eng.event({ type: 'dns', host: d.id, name, server: srv, ok: !!r.ok, addr: r.addr, rcode: r.rcode, aa: r.aa });
   const answers = r.answers || [];
-  if (short) return answers.map(x => (x.type === 'A' ? fmtIp(x.addr) : x.target ? x.target + '.' : x.text || ''));
+  eng.event({ type: 'dns', host: d.id, name, server: srv, ok: !!r.ok || (type === 'AAAA' && answers.some(x => x.type === 'AAAA')), addr: r.addr, rcode: r.rcode, aa: r.aa, qtype: type });
+  const rdata = x => (x.type === 'A' ? fmtIp(x.addr) : x.type === 'AAAA' ? fmtIp6(x.addr6) : x.target ? x.target + '.' : x.text || ''); // ---- ipv6: AAAA rdata
+  if (short) return answers.map(rdata);
   const q = (r.qname || name).replace(/\.?$/, '.');
   const L = ['', `; <<>> DiG 9.18.28-0ubuntu0.24.04.1-Ubuntu <<>> ${args.join(' ')}`, ';; global options: +cmd', ';; Got answer:', `;; ->>HEADER<<- opcode: QUERY, status: ${r.rcode || 'NOERROR'}, id: ${10000 + Math.floor(eng.rand() * 50000)}`, `;; flags: qr${r.aa ? ' aa' : ''} rd ra; QUERY: 1, ANSWER: ${answers.length}, AUTHORITY: 0, ADDITIONAL: 1`, '', ';; OPT PSEUDOSECTION:', '; EDNS: version: 0, flags:; udp: 1232', ';; QUESTION SECTION:', `;${q}\t\tIN\t${type}`, ''];
   if (answers.length) {
     L.push(';; ANSWER SECTION:');
-    for (const x of answers) L.push(`${x.name}.\t${x.ttl}\tIN\t${x.type}\t${x.type === 'A' ? fmtIp(x.addr) : x.target ? x.target + '.' : x.text}`);
+    for (const x of answers) L.push(`${x.name}.\t${x.ttl}\tIN\t${x.type}\t${rdata(x)}`);
     L.push('');
   }
-  L.push(`;; Query time: ${Math.max(0, Math.round(r.probe?.rttMs || 0))} msec`, `;; SERVER: ${fmtIp(srv)}#53(${fmtIp(srv)}) (UDP)`, `;; WHEN: ${w.dow.slice(0, 3)} ${w.mon} ${w.day} ${p2(w.hh)}:${p2(w.mm)}:${p2(w.ss)} UTC ${w.year}`, `;; MSG SIZE  rcvd: ${40 + answers.length * 16}`);
+  L.push(`;; Query time: ${Math.max(0, Math.round(r.probe?.rttMs || 0))} msec`, `;; SERVER: ${fmtAddr(srv)}#53(${fmtAddr(srv)}) (UDP)`, `;; WHEN: ${w.dow.slice(0, 3)} ${w.mon} ${w.day} ${p2(w.hh)}:${p2(w.mm)}:${p2(w.ss)} UTC ${w.year}`, `;; MSG SIZE  rcvd: ${40 + answers.length * 16}`);
   return L;
 }
 
@@ -226,9 +304,23 @@ function curlLinux(eng, d, args) {
   const url = args.find(a => !a.startsWith('-'));
   if (!url) return ["curl: try 'curl --help' or 'curl --manual' for more information"];
   const fixed = /^https?:\/\//i.test(url) ? url : `http://${url}`;
-  const r = httpRequest(eng, d, fixed, { insecure: flags.has('-k') });
+  const family = flags.has('-6') || flags.has('--ipv6') ? 6 : flags.has('-4') || flags.has('--ipv4') ? 4 : undefined;
+  const r = httpRequest(eng, d, fixed, { insecure: flags.has('-k'), family });
   const u = parseUrl(fixed);
   const L = [];
+  if ((flags.has('-v') || flags.has('--verbose')) && r.attempts) {
+    // ---- ipv6: curl 8.5 verbose resolver summary and Happy Eyeballs attempts (Linux errno wording)
+    if (!r.lookup?.literal) L.push(`* Host ${u.host}:${u.port} was resolved.`, `* IPv6: ${r.lookup.v6.length ? r.lookup.v6.map(fmtIp6).join(', ') : '(none)'}`, `* IPv4: ${r.lookup.v4.length ? r.lookup.v4.map(fmtIp).join(', ') : '(none)'}`);
+    for (const at of r.attempts) {
+      L.push(`*   Trying ${at.family === 6 ? `[${fmtIp6(at.addr)}]` : fmtIp(at.addr)}:${u.port}...`);
+      if (at.ok) continue;
+      const p = at.probe;
+      if (p.status === 'local-error') L.push(`* Immediate connect fail for ${fmtAddr(at.addr)}: Network is unreachable`);
+      else if (p.kind === 'rst') L.push(`* connect to ${fmtAddr(at.addr)} port ${u.port} from ${fmtAddr(p.fwd.pkt.src)} port ${at.sport} failed: Connection refused`);
+      else if (p.status === 'ok' && /unreachable/.test(p.kind)) L.push(`* connect to ${fmtAddr(at.addr)} port ${u.port} from ${fmtAddr(p.fwd.pkt.src)} port ${at.sport} failed: ${p.kind === 'net-unreachable' ? 'Network is unreachable' : 'No route to host'}`);
+    }
+    if (r.stage !== 'connect' && r.stage !== 'resolve') L.push(`* Connected to ${u.host} (${fmtAddr(r.ip)}) port ${u.port}`);
+  }
   if (r.stage === 'resolve') L.push(`curl: (6) Could not resolve host: ${u.host}`);
   else if (r.stage === 'connect') L.push(r.error.code === 28 ? `curl: (28) Failed to connect to ${u.host} port ${u.port} after 13${String(Math.floor(eng.rand() * 9000)).padStart(4, '0')} ms: Couldn't connect to server` : `curl: (7) Failed to connect to ${u.host} port ${u.port} after 0 ms: Couldn't connect to server`);
   else if (r.stage === 'tls') L.push(`curl: (60) SSL: no alternative certificate subject name matches target host name '${u.host}'`, 'More details here: https://curl.se/docs/sslcerts.html', '', 'curl failed to verify the legitimacy of the server and therefore could not', 'establish a secure connection to it. To learn more about this situation and', 'how to fix it, please visit the web page mentioned above.');
@@ -237,7 +329,7 @@ function curlLinux(eng, d, args) {
     if (flags.has('-i') || flags.has('-I')) L.push(`HTTP/1.1 ${r.status}`, 'Server: nginx/1.24.0 (Ubuntu)', `Content-Type: ${r.type}`, '');
     if (!flags.has('-I')) L.push(r.body);
   }
-  eng.event({ type: 'http', host: d.id, url: fixed.toLowerCase(), hostname: u?.host, ip: r.ip, ok: !!r.ok, status: r.status ?? null, stage: r.stage, code: r.error?.code ?? null });
+  eng.event({ type: 'http', host: d.id, url: fixed.toLowerCase(), hostname: u?.host, ip: r.ip, ok: !!r.ok, status: r.status ?? null, stage: r.stage, code: r.error?.code ?? null, ...(r.family === 6 ? { family: 6 } : {}) });
   return L;
 }
 
@@ -248,23 +340,42 @@ function ssCmd(eng, d) {
     if (!svc.active) continue;
     const proc = { 'isc-dhcp-server': 'dhcpd', named: 'named', nginx: 'nginx', sshd: 'sshd', rtsp: 'nvr' }[key] || key;
     for (const l of svc.listen || []) {
+      if (l.family === 6) continue;
       const local = key === 'named' && a.addr !== null ? fmtIp(a.addr) : '0.0.0.0';
       L.push(`${l.proto.padEnd(6)}${(l.proto === 'udp' ? 'UNCONN' : 'LISTEN').padEnd(7)}0      ${l.proto === 'udp' ? '0     ' : '4096  '}${`${local}:${l.port}`.padStart(19)}${'0.0.0.0:*'.padStart(21)} users:(("${proc}",pid=${pidFor(d, proc)},fd=${3 + l.port % 7}))`);
+    }
+    // ---- ipv6: dual-stack listeners also hold an IPv6 socket
+    for (const l of svc.listen || []) {
+      if (l.family === 4 || svc.kind === 'dhcp' || !hostAddr6(eng, d).enabled) continue;
+      L.push(`${l.proto.padEnd(6)}${(l.proto === 'udp' ? 'UNCONN' : 'LISTEN').padEnd(7)}0      ${l.proto === 'udp' ? '0     ' : '4096  '}${`[::]:${l.port}`.padStart(19)}${'[::]:*'.padStart(21)} users:(("${proc}",pid=${pidFor(d, proc)},fd=${4 + l.port % 7}))`);
     }
   }
   return L;
 }
 
-function ipCmd(eng, d, args) {
+function ipCmd(eng, d, args0) {
+  // ---- ipv6: "ip -6 ..." / "ip -4 ..." select the family; plain "ip a" shows both
+  const fam = args0.includes('-6') ? 6 : args0.includes('-4') ? 4 : null;
+  const args = args0.filter(x => x !== '-6' && x !== '-4');
   const sub = (args[0] || 'a').toLowerCase();
   const a = hostAddr(eng, d);
   const up = eng.portUp(d.id, d.nic);
   const mac = macLinux(d.ports[d.nic].mac);
+  if (fam === 6) {
+    if ('address'.startsWith(sub) || sub === 'a') return ['1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN qlen 1000', ...LO_INET6, `2: ${d.nic}: <BROADCAST,MULTICAST,UP${up ? ',LOWER_UP' : ''}> mtu 1500 state ${up ? 'UP' : 'DOWN'} qlen 1000`, ...linuxInet6Lines(eng, d)];
+    if ('route'.startsWith(sub)) return linuxRoute6(eng, d);
+    if ('neighbour'.startsWith(sub) || 'neighbor'.startsWith(sub)) return linuxNeigh6(eng, d);
+    return [`Object "${args[0]}" is unknown, try "ip help".`];
+  }
   if ('address'.startsWith(sub) || sub === 'a') {
-    const L = ['1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000', '    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00', '    inet 127.0.0.1/8 scope host lo', '       valid_lft forever preferred_lft forever', `2: ${d.nic}: <BROADCAST,MULTICAST,UP${up ? ',LOWER_UP' : ''}> mtu 1500 qdisc mq state ${up ? 'UP' : 'DOWN'} group default qlen 1000`, `    link/ether ${mac} brd ff:ff:ff:ff:ff:ff`];
+    const L = ['1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000', '    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00', '    inet 127.0.0.1/8 scope host lo', '       valid_lft forever preferred_lft forever'];
+    if (fam !== 4) L.push(...LO_INET6);
+    L.push(`2: ${d.nic}: <BROADCAST,MULTICAST,UP${up ? ',LOWER_UP' : ''}> mtu 1500 qdisc mq state ${up ? 'UP' : 'DOWN'} group default qlen 1000`, `    link/ether ${mac} brd ff:ff:ff:ff:ff:ff`);
     if (a.addr !== null) L.push(`    inet ${fmtIp(a.addr)}/${a.len} brd ${fmtIp(broadcastOf(a.addr, a.len))} scope global ${a.source === 'dhcp' ? 'dynamic ' : ''}${d.nic}`, '       valid_lft forever preferred_lft forever');
+    if (fam !== 4) L.push(...linuxInet6Lines(eng, d));
     return L;
   }
+  if (('neighbour'.startsWith(sub) || 'neighbor'.startsWith(sub)) && sub.length >= 1 && sub[0] === 'n') return linuxNeigh6(eng, d);
   if ('route'.startsWith(sub)) {
     if (a.addr === null || !up) return [];
     const L = [];
@@ -438,7 +549,7 @@ export function linuxExecute(eng, sess, raw) {
   const args = parts.slice(1);
   const out = (lines, extra = {}) => ({ lines: pipes.length ? applyPipes(lines, pipes) : lines, ...extra });
   switch (cmd) {
-    case 'help': return out(['Supported commands on this training image:', '  ip a | ip r | ip link        ping [-c n] host        traceroute host', '  dig [@server] name [type] [+short]                   nslookup name [server]', '  curl [-i] [-k] url           ss -tulpn                hostname   date   uptime', '  systemctl status|start|stop|restart|reload <unit>    journalctl [-u unit] [-n N]', '  cat <file>   ls [dir]   nano <file>   cd <dir>   pwd', '  dhcpd -t -cf /etc/dhcp/dhcpd.conf     dhcp-lease-list     netplan apply', '  named-checkzone <zone> <file>         named-checkconf      rndc reload', '  Pipes: | grep [-i] pattern  | tail -n N  | head -n N']);
+    case 'help': return out(['Supported commands on this training image:', '  ip a | ip r | ip link | ip -6 a | ip -6 r | ip -6 neigh   ping [-4|-6] [-c n] host   traceroute [-4|-6] host', '  dig [@server] name [A|AAAA|...] [+short]             nslookup name [server]', '  curl [-4|-6] [-v] [-i] [-k] url   ss -tulpn           hostname   date   uptime', '  systemctl status|start|stop|restart|reload <unit>    journalctl [-u unit] [-n N]', '  cat <file>   ls [dir]   nano <file>   cd <dir>   pwd', '  dhcpd -t -cf /etc/dhcp/dhcpd.conf     dhcp-lease-list     netplan apply', '  named-checkzone <zone> <file>         named-checkconf      rndc reload', '  Pipes: | grep [-i] pattern  | tail -n N  | head -n N']);
     case 'clear': return { lines: [], clear: true };
     case 'hostname': return out([d.hostname.toLowerCase()]);
     case 'whoami': return out(['root']);
@@ -470,23 +581,31 @@ export function linuxExecute(eng, sess, raw) {
     }
     case 'ip': return out(ipCmd(eng, d, args));
     case 'ifconfig': return out(['Command \'ifconfig\' not found, but can be installed with:', 'apt install net-tools', { t: 'note', text: 'trainer: modern Linux uses "ip a" (iproute2).' }]);
-    case 'ping': return out(pingLinux(eng, d, args));
-    case 'traceroute': case 'tracepath': return out(traceLinux(eng, d, args));
+    case 'ping': case 'ping6': return out(pingLinux(eng, d, args, cmd));
+    case 'traceroute': case 'tracepath': case 'traceroute6': return out(traceLinux(eng, d, args, cmd));
     case 'dig': return out(digCmd(eng, d, args));
     case 'nslookup': {
       const name = args[0];
       if (!name) return out(['> ', { t: 'note', text: 'trainer: interactive mode not supported; use nslookup <name> [server].' }]);
-      const srv = args[1] ? parseIp(args[1]) : (hostAddr(eng, d).dns || [])[0];
+      const srv = args[1] ? (parseIp(args[1]) ?? parseIp6(args[1]) ?? undefined) : (hostAddr(eng, d).dns || [])[0];
       const r = resolveName(eng, d, name, { server: srv });
       if (r.error === 'timeout' || r.error === 'refused') {
         eng.event({ type: 'dns', host: d.id, name, ok: false, error: r.error });
-        const why = `;; communications error to ${fmtIp(srv)}#53: ${r.error === 'refused' ? 'connection refused' : 'timed out'}`;
+        const why = `;; communications error to ${fmtAddr(srv)}#53: ${r.error === 'refused' ? 'connection refused' : 'timed out'}`;
         return out([why, why, ';; no servers could be reached', '']);
       }
-      const L = [`Server:\t\t${fmtIp(srv)}`, `Address:\t${fmtIp(srv)}#53`, ''];
-      if (r.ok) { if (!r.aa) L.push('Non-authoritative answer:'); L.push(`Name:\t${r.qname}`, `Address: ${fmtIp(r.addr)}`, ''); }
+      const L = [`Server:\t\t${fmtAddr(srv)}`, `Address:\t${fmtAddr(srv)}#53`, ''];
+      // ---- ipv6: BIND's nslookup asks for A and AAAA and prints both answers
+      const r6 = r.ok || r.rcode === 'NOERROR' ? resolveName6(eng, d, name, { server: srv }) : null;
+      const v6 = r6?.ok ? r6.addrs : [];
+      if (r.ok || v6.length) {
+        if (!(r.ok ? r : r6).aa) L.push('Non-authoritative answer:');
+        if (r.ok) L.push(`Name:\t${r.qname}`, `Address: ${fmtIp(r.addr)}`);
+        for (const x of v6) L.push(`Name:\t${r6.qname}`, `Address: ${fmtIp6(x)}`);
+        L.push('');
+      } else if (r.rcode === 'NOERROR') L.push(`*** Can't find ${r.qname || name}: No answer`, '');
       else L.push(`** server can't find ${r.qname || name}: ${r.rcode || 'SERVFAIL'}`, '');
-      eng.event({ type: 'dns', host: d.id, name, ok: !!r.ok, addr: r.addr });
+      eng.event({ type: 'dns', host: d.id, name, ok: !!r.ok || v6.length > 0, addr: r.addr });
       return out(L);
     }
     case 'curl': return out(curlLinux(eng, d, args));
@@ -566,6 +685,9 @@ export function linuxExecute(eng, sess, raw) {
       const r = parseNetplan(t, path, d.nic);
       if (!r.ok) { eng.event({ type: 'configtest', host: d.id, what: 'netplan', ok: false }); return out([r.error]); }
       d.ipcfg.static = { ...d.ipcfg.static, ...r.cfg };
+      // ---- ipv6: static IPv6 addresses / default route from netplan; accept-ra
+      d.ipcfg.static6 = r.v6.addrs.length || r.v6.gw ? r.v6 : null;
+      if (r.acceptRa !== undefined) d.ipcfg.acceptRa = r.acceptRa;
       eng.mutated(`${d.hostname}: netplan apply`);
       eng.event({ type: 'netplan', host: d.id, ok: true });
       return out(args[0] === 'try' ? ['Do you want to keep these settings?', '', 'Press ENTER before the timeout to accept the new configuration', '', 'Configuration accepted.'] : []);

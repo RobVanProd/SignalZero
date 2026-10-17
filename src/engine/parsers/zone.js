@@ -7,6 +7,7 @@
 // explicit TTL rejects the zone; after an explicit TTL, later records inherit it ("using RFC1035 TTL semantics").
 // Error text imitates named-checkzone.
 import { parseIp } from '../ipv4.js';
+import { parseIp6 } from '../ipv6.js';
 
 const TYPES = new Set(['SOA', 'NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'PTR']);
 // Valid RR types this subset stores but does not interpret (BIND would load them).
@@ -143,7 +144,13 @@ export function parseZone(text, zone, file = 'db.zone') {
     } else if (type === 'TXT') {
       rec.text = rdata.join(' ').replace(/^"|"$/g, '');
     } else if (type === 'AAAA') {
-      rec.addr6 = rdata[0];
+      // ---- ipv6: RFC 3596 text form; BIND (lib/dns/rdata/in_1/aaaa_28.c) rejects it with DNS_R_BADAAAA
+      const a6 = parseIp6(rdata[0] || '');
+      if (a6 === null || rdata.length !== 1 || rdata[0].includes('/') || rdata[0].includes('%')) {
+        errors.push(`dns_rdata_fromtext: ${file}:${ll.line}: near '${rdata[0] || ''}': bad IPv6 address`);
+        break;
+      }
+      rec.addr6 = a6;
     } else {
       if (!rdata.length) { errors.push(`dns_rdata_fromtext: ${file}:${ll.line}: unexpected end of input`); break; }
       rec.data = rdata.join(' ');
@@ -188,7 +195,7 @@ export function parseZone(text, zone, file = 'db.zone') {
 }
 
 // isc_result_totext() wording for the master-file loader failures this parser detects.
-const LOAD_RESULT = [[/dotted quad/, 'bad dotted quad'], [/unbalanced/, 'unbalanced parentheses'], [/end of input/, 'unexpected end of input'], [/no TTL/, 'no ttl'], [/bad ttl/, 'bad ttl'], [/unknown RR type/, 'unknown class/type'], [/CNAME and other data/, 'CNAME and other data']];
+const LOAD_RESULT = [[/dotted quad/, 'bad dotted quad'], [/bad IPv6 address/, 'bad IPv6 address'], [/unbalanced/, 'unbalanced parentheses'], [/end of input/, 'unexpected end of input'], [/no TTL/, 'no ttl'], [/bad ttl/, 'bad ttl'], [/unknown RR type/, 'unknown class/type'], [/CNAME and other data/, 'CNAME and other data']];
 
 /** The lines named and named-checkzone log after a failed zone load (zone-level checks have no "loading" line). */
 export function zoneLoadFailure(res, file = res.file) {

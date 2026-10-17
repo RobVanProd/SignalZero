@@ -14,6 +14,7 @@
 import { flood } from './switching.js';
 import { hostAddr, hostNextHop, l3Ifaces, routeTable, lookup, evalAcl, natOutbound } from './routing.js';
 import { fmtIp, inSubnet } from './ipv4.js';
+import { sendPacket6, initialHopLimit } from './trace6.js';
 
 const MAX_L3_HOPS = 32;
 
@@ -47,7 +48,7 @@ export function arpResolve(eng, devId, port, tag, ip) {
   return { ep: null, flood: fl };
 }
 
-function pathImpairment(eng, path) {
+export function pathImpairment(eng, path) {
   let pass = 1;
   let latency = 0;
   let jitter = 0;
@@ -67,13 +68,16 @@ function routerService(pkt, ingress) {
   return ingress?.cfg.unreachables === false ? 'filtered-host' : 'udp-closed';
 }
 
-function hostService(d, pkt) {
+/** What a host does with a packet addressed to it. Listeners are dual-stack unless they name a family (4 or 6). */
+export function hostService(d, pkt) {
   if (pkt.proto === 'icmp') {
     if (!d.firewall.icmp) return 'filtered-host';
     return 'echo';
   }
   if ((d.firewall.drop || []).some(r => r.proto === pkt.proto && r.port === pkt.dport)) return 'filtered-host';
-  const listening = Object.values(d.services || {}).some(svc => svc.active && (svc.listen || []).some(l => l.proto === pkt.proto && l.port === pkt.dport));
+  const fam = pkt.v6 ? 6 : 4;
+  // DHCP services here are DHCPv4 (ISC dhcpd -4, dnsmasq's DHCPv4 side): no IPv6 socket.
+  const listening = Object.values(d.services || {}).some(svc => svc.active && !(fam === 6 && svc.kind === 'dhcp') && (svc.listen || []).some(l => l.proto === pkt.proto && l.port === pkt.dport && (!l.family || l.family === fam)));
   if (pkt.proto === 'tcp') return listening ? 'tcp-open' : 'tcp-refused';
   return listening ? 'udp-open' : 'udp-closed';
 }
@@ -84,6 +88,8 @@ function hostService(d, pkt) {
  * Returns { outcome, at, pkt, hops, notes, pass, latency, jitter, icmpFrom?, service? }
  */
 export function sendPacket(eng, opts) {
+  // ---- IPv6 addresses are hex strings: walk the packet with the IPv6 rules (trace6.js)
+  if (typeof opts.dst === 'string') return sendPacket6(eng, opts);
   const st = eng.s;
   const src = st.devices[opts.from];
   const notes = [];
@@ -230,6 +236,9 @@ function responseFor(fwd, req) {
       }
     case 'ttl-exceeded': return { proto: 'icmp', icmpType: 'ttl-exceeded', kind: 'ttl-exceeded', fromIp: fwd.icmpFrom };
     case 'net-unreachable': return { proto: 'icmp', icmpType: 'net-unreachable', kind: 'net-unreachable', fromIp: fwd.icmpFrom };
+    // ICMPv6 destination unreachable, code 3 (address unreachable) and code 2 (beyond scope of source address)
+    case 'addr-unreachable': return { proto: 'icmp', icmpType: 'addr-unreachable', kind: 'addr-unreachable', fromIp: fwd.icmpFrom };
+    case 'scope-unreachable': return { proto: 'icmp', icmpType: 'scope-unreachable', kind: 'scope-unreachable', fromIp: fwd.icmpFrom };
     default: return null;
   }
 }
@@ -239,6 +248,7 @@ function responseFor(fwd, req) {
  * Returns { status, kind, fwd, rep, responderIp, ttl, rttMs, pass }
  *   status: 'ok' (reply received), 'timeout', 'local-error'
  *   kind:   reply | syn-ack | rst | udp-reply | port-unreachable | ttl-exceeded | net-unreachable
+ *           (IPv6 also: addr-unreachable, scope-unreachable). req.dst may be an IPv6 hex string; result.v6 marks it.
  */
 export function probe(eng, req) {
   const src = eng.s.devices[req.from];
@@ -248,8 +258,9 @@ export function probe(eng, req) {
   if (!resp) return { status: 'timeout', fwd, lostAt: fwd.at, lostReason: fwd.reason || 'no response (filtered)' };
   const responder = eng.s.devices[fwd.at];
   const fromIp = resp.fromIp ?? fwd.pkt.dst;
+  const v6 = typeof req.dst === 'string';
   if (fwd.at === req.from) {
-    return { status: 'ok', kind: resp.kind, fwd, rep: null, responderIp: fromIp, ttl: initialTtl(src), rttMs: 0.02, pass: 1 };
+    return { status: 'ok', kind: resp.kind, fwd, rep: null, responderIp: fromIp, ttl: v6 ? initialHopLimit(src) : initialTtl(src), rttMs: 0.02, pass: 1, ...(v6 ? { v6 } : {}) };
   }
   const isErr = resp.proto === 'icmp' && resp.kind !== 'reply';
   const f = fwd.pkt;
@@ -257,9 +268,10 @@ export function probe(eng, req) {
     from: responder.id, srcIp: fromIp, dst: f.src, proto: resp.proto, icmpType: resp.icmpType, flags: resp.flags,
     sport: f.dport, dport: f.sport, nat: fwd.nat, record: req.record,
     emb: isErr ? { proto: f.proto, src: f.src, dst: f.dst, sport: f.sport, dport: f.dport } : undefined,
+    ...(v6 ? { oif: fwd.ingress } : {}),
   });
   const backHome = rep.outcome === 'delivered' && rep.at === req.from;
-  if (!backHome) return { status: 'timeout', fwd, rep, lostAt: rep.at, lostReason: `reply lost: ${rep.reason || rep.outcome}`, replyLost: true };
+  if (!backHome) return { status: 'timeout', fwd, rep, lostAt: rep.at, lostReason: `reply lost: ${rep.reason || rep.outcome}`, replyLost: true, ...(v6 ? { v6 } : {}) };
   const rtt = 0.05 + fwd.latency + rep.latency;
-  return { status: 'ok', kind: resp.kind, fwd, rep, responderIp: fromIp, ttl: rep.pkt.ttl, rttMs: rtt, jitter: fwd.jitter + rep.jitter, pass: fwd.pass * rep.pass };
+  return { status: 'ok', kind: resp.kind, fwd, rep, responderIp: fromIp, ttl: rep.pkt.ttl, rttMs: rtt, jitter: fwd.jitter + rep.jitter, pass: fwd.pass * rep.pass, ...(v6 ? { v6 } : {}) };
 }

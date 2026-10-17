@@ -18,6 +18,7 @@ const VERIFY = {
   M08: run => run('CORE-SRV', 'dhcp-lease-list'),
   M09: run => run('DISPATCH-01', 'pathping backup.example.net'),
   M10: run => { run('GUEST-KIOSK', 'ipconfig /renew'); run('GUEST-KIOSK', 'curl https://portal.example.net/'); },
+  M11: run => { run('DISPATCH-01', 'ipconfig'); run('CORE-SRV', 'curl -6 https://backup6.example.net/health'); },
 };
 
 function fresh() {

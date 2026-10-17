@@ -6,6 +6,7 @@ import { fmtIp, parseIp, maskToPrefix, networkOf, overlaps, fmtMask, inSubnet } 
 import { longIf, canonIf, parentIf, portDefaults } from '../engine/model.js';
 import { initialTtl } from '../engine/trace.js';
 import { l3Ifaces } from '../engine/routing.js';
+import { addIpv6Grammar, runIpv6, answerPending } from './ios-ipv6.js'; // ---- ipv6
 
 const PORT_NUM = { www: 80, http: 80, domain: 53, bootps: 67, bootpc: 68, telnet: 23, smtp: 25, ftp: 21, tftp: 69, ntp: 123, snmp: 161, syslog: 514, pop3: 110, bgp: 179, isakmp: 500 };
 
@@ -19,6 +20,7 @@ function promptFor(dev, sess) {
     case 'acl-ext': return `${h}(config-ext-nacl)#`;
     case 'acl-std': return `${h}(config-std-nacl)#`;
     case 'vlan': return `${h}(config-vlan)#`;
+    case 'acl6': return `${h}(config-ipv6-acl)#`; // ---- ipv6
     default: return `${h}#`;
   }
 }
@@ -343,6 +345,7 @@ function buildGrammar(kind) {
     g.add(ifm, 'no ip proxy-arp', 'no-proxy');
     g.add(ifm, 'ip unreachables', 'unreach');
     g.add(ifm, 'no ip unreachables', 'no-unreach');
+    addIpv6Grammar(g); // ---- ipv6
   }
   return g;
 }
@@ -384,6 +387,7 @@ export function iosExecute(eng, sess, raw) {
   const dev = eng.s.devices[sess.dev];
   const g = GRAMMARS[dev.kind === 'router' ? 'router' : 'switch'];
   const prompt = promptFor(dev, sess);
+  if (sess.pending) return { ...answerPending(eng, dev, sess, raw), prompt }; // ---- ipv6: "Output Interface:" prompt
   let line = normaliseIfSpacing(raw.replace(/\t/g, ' '));
   if (!line.trim()) return { lines: [], prompt };
   if (line.trim().startsWith('!')) return { lines: [], prompt };
@@ -856,7 +860,11 @@ function run(handler, ctx) {
     case 'no-proxy': for (const p of ifTargets(ctx)) p.proxyArp = false; mut(ctx); return done();
     case 'unreach': for (const p of ifTargets(ctx)) p.unreachables = true; mut(ctx); return done();
     case 'no-unreach': for (const p of ifTargets(ctx)) p.unreachables = false; mut(ctx); return done();
-    default:
+    default: {
+      // ---- ipv6
+      const r6 = runIpv6(handler, ctx, { mut, ifTarget: c => (c.sess.ctx.sub ? c.dev.subifs[c.sess.ctx.sub] : c.sess.ctx.iface ? c.dev.ports[c.sess.ctx.iface] : null) });
+      if (r6) return r6;
+    }
       L.push(`% Command not implemented in this training image: ${ctx.line}`);
       return done();
   }

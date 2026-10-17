@@ -4,6 +4,7 @@ import { longIf, macCisco } from '../engine/model.js';
 import { carries, stpDisabled, stpRecord, bridgePriority, portCost, knowsVlan, allVlans } from '../engine/switching.js';
 import { l3Ifaces, describeAddr, hostAddr, lookup } from '../engine/routing.js';
 import { wallClock } from '../engine/engine.js';
+import { interfaceConfig6, routesConfig6, aclsConfig6 } from './ios-show6.js'; // ---- ipv6
 
 const pad = (s, n) => String(s).padEnd(n);
 const lpad = (s, n) => String(s).padStart(n);
@@ -68,6 +69,7 @@ export function interfaceConfig(d, name) {
     if (s.unreachables === false) body.push(' no ip unreachables');
     if (s.nat) body.push(` ip nat ${s.nat}`);
     if (!s.adminUp) body.push(' shutdown');
+    body.push(...interfaceConfig6(s)); // ---- ipv6
     return body;
   }
   if (p.description) body.push(` description ${p.description}`);
@@ -97,6 +99,7 @@ export function interfaceConfig(d, name) {
     if (p.nat) body.push(` ip nat ${p.nat}`);
     if (!p.adminUp) body.push(' shutdown');
     body.push(` duplex ${p.duplex}`, ` speed ${p.speed}`);
+    body.push(...interfaceConfig6(p)); // ---- ipv6: IOS lists the IPv6 lines after duplex/speed
   }
   return body;
 }
@@ -114,7 +117,9 @@ export function runningConfig(eng, d) {
   L.push('Building configuration...', '');
   const body = [];
   body.push('!', `! Last configuration change at ${String(w.hh).padStart(2, '0')}:${String(w.mm).padStart(2, '0')}:${String(w.ss).padStart(2, '0')} UTC ${w.dow.slice(0, 3)} ${w.mon} ${w.day} ${w.year}`, '!');
-  body.push(d.kind === 'router' ? 'version 15.7' : 'version 17.9', 'service timestamps debug datetime msec', 'service timestamps log datetime msec', 'no service password-encryption', '!', `hostname ${d.hostname}`, '!', 'no ip domain lookup', '!');
+  body.push(d.kind === 'router' ? 'version 15.7' : 'version 17.9', 'service timestamps debug datetime msec', 'service timestamps log datetime msec', 'no service password-encryption', '!', `hostname ${d.hostname}`, '!', 'no ip domain lookup');
+  if (d.ipv6Routing) body.push('ipv6 unicast-routing'); // ---- ipv6
+  body.push('!');
   if (d.relayTrustAll) body.push('ip dhcp relay information trust-all', '!');
   if (d.kind === 'switch') {
     if (d.snoop.vlans.length) body.push(`ip dhcp snooping vlan ${fmtRangeList(d.snoop.vlans)}`);
@@ -141,6 +146,7 @@ export function runningConfig(eng, d) {
     for (const r of d.nat) body.push(`ip nat inside source list ${r.acl} interface ${longIf(r.iface)}${r.overload ? ' overload' : ''}`);
     for (const r of d.routes) body.push(`ip route ${fmtIp(r.net)} ${fmtMask(r.len)} ${r.iface ? longIf(r.iface) + (r.nh !== null && r.nh !== undefined ? ' ' + fmtIp(r.nh) : '') : fmtIp(r.nh)}${r.ad && r.ad !== 1 ? ' ' + r.ad : ''}`);
     body.push('!');
+    body.push(...routesConfig6(d)); // ---- ipv6: ipv6 route lines
     for (const [name, acl] of Object.entries(d.acls)) {
       if (/^\d+$/.test(name)) {
         for (const e of acl.entries) body.push(`access-list ${name} ${aceText(acl, e)}`);
@@ -150,6 +156,7 @@ export function runningConfig(eng, d) {
       }
       body.push('!');
     }
+    body.push(...aclsConfig6(d)); // ---- ipv6: ipv6 access-lists
   }
   body.push('line con 0', ' logging synchronous', 'line vty 0 4', ' login local', ' transport input ssh', '!', 'end');
   const bytes = body.join('\n').length;

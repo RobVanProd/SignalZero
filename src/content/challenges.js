@@ -9,6 +9,9 @@ import { MISSIONS, enableFlows, cli, httpOk, reaches } from './missions.js';
 import { dhcpClient, applyDhcpResult, dhcpdStop } from '../engine/services.js';
 import { saveFile } from '../cli/index.js';
 import { renderNetplan } from '../engine/parsers/netplan.js';
+// ---- ipv6
+import { v6Reboot } from '../engine/net6.js';
+import { WAN6 } from './district.js';
 
 export function rngFrom(seed) {
   let a = seed >>> 0;
@@ -53,7 +56,7 @@ export function buildHealthy(params) {
   eng.reindex();
   eng.mutated('maintenance window closed', 'system');
   eng.advance(35);
-  enableFlows(eng, ['clinic', 'backup', 'guest', 'isolation', 'nurse', 'staff', 'cams', 'voice']);
+  enableFlows(eng, ['clinic', 'backup', 'guest', 'isolation', 'nurse', 'staff', 'cams', 'voice', 'ipv6']);
   eng.s.changeLog = [];
   eng.s.events = [];
   for (const d of Object.values(eng.s.devices)) { if (d.logging) d.logging = []; if (d.journal) d.journal = d.journal.slice(-20); }
@@ -69,6 +72,7 @@ export function healthReport(eng) {
 
 function reboot(eng, id) {
   const d = eng.s.devices[id];
+  v6Reboot(eng, d); // ---- ipv6: a reboot forgets what Router Advertisements taught it, then solicits again
   d.dnsCache = {};
   const res = dhcpClient(eng, d, { mode: 'discover', current: null });
   applyDhcpResult(eng, d, res);
@@ -192,6 +196,34 @@ export const FAULTS = [
       cli(eng)('CLINIC-APP', 'netplan apply');
     },
   },
+  // ---- ipv6 (Act II)
+  {
+    id: 'ra-suppressed', title: 'Router advertisements suppressed on the clinic VLAN', objectives: ['1.8', '5.3', '1.7'],
+    // "suppress" alone would still answer the Router Solicitation a rebooting host sends; "all" stops that too.
+    inject(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', `interface g0/1.${vl(eng, 'clinic')}`, 'ipv6 nd ra suppress all', 'end');
+      reboot(eng, 'DISPATCH-01');
+      v6Reboot(eng, eng.s.devices['CORE-SRV']); // a static-IPv4 server: only its learned IPv6 state is lost
+      return { change: 'EDGE-RTR: "rogue RA" hardening on the clinic VLAN; CORE-SRV and DISPATCH-01 rebooted for patching' };
+    },
+    fix(eng) { cli(eng)('EDGE-RTR', 'enable', 'configure terminal', `interface g0/1.${vl(eng, 'clinic')}`, 'no ipv6 nd ra suppress', 'end'); },
+  },
+  {
+    id: 'ipv6-default-route', title: 'IPv6 default route points at a host that does not exist', objectives: ['2.1', '1.8', '5.3'],
+    // ::9 is inside the connected WAN /64, so IOS installs the route; Neighbor Discovery for it then fails and
+    // EDGE-RTR returns ICMPv6 address unreachable.
+    inject(eng) { cli(eng)('EDGE-RTR', 'enable', 'configure terminal', `no ipv6 route ::/0 ${WAN6.isp}`, 'ipv6 route ::/0 2001:db8:ffff:1::9', 'end'); return { change: 'EDGE-RTR: WAN migration prep (IPv6)' }; },
+    fix(eng) { cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'no ipv6 route ::/0 2001:db8:ffff:1::9', `ipv6 route ::/0 ${WAN6.isp}`, 'end'); },
+  },
+  {
+    id: 'ipv6-acl-nd', title: 'IPv6 edge ACL blocks Neighbor Discovery', objectives: ['4.3', '1.8', '5.3'],
+    // An explicit "deny ipv6 any any" comes before IOS's implicit nd-na / nd-ns permits.
+    inject(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ipv6 access-list WAN6-IN', 'permit tcp any any established', 'permit icmp any any echo-reply', 'permit icmp any any unreachable', 'permit icmp any any time-exceeded', 'deny ipv6 any any log', 'exit', 'interface g0/0', 'ipv6 traffic-filter WAN6-IN in', 'end');
+      return { change: 'EDGE-RTR: IPv6 edge filter added (security review SR-118)' };
+    },
+    fix(eng) { cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ipv6 access-list WAN6-IN', 'sequence 45 permit icmp any any nd-na', 'sequence 46 permit icmp any any nd-ns', 'end'); },
+  },
 ];
 
 const COMPLAINTS = {
@@ -203,6 +235,7 @@ const COMPLAINTS = {
   staff: 'Staff laptops in Sector B show "No Internet".',
   cams: 'Some camera feeds are black.',
   voice: 'Dispatch calls are choppy and drop words.',
+  ipv6: 'Dispatch says IPv6-only sites will not load.', // ---- ipv6
 };
 
 /**
@@ -300,6 +333,7 @@ export class ChallengeRun {
       '4.3': 'Read the ACL hit counters (show access-lists) while repeating the failing test.',
       '5.3': 'Separate name, address, path and service: nslookup, ping by IP, tracert, then curl -v.',
       '1.4': 'Which protocol and port does the failing application need, and does anything filter it?',
+      '1.8': 'Check IPv6 layer by layer: does the client have a global IPv6 address and a default router (ipconfig, ip -6 addr, ip -6 route)? Does the router advertise, route and resolve neighbours (show ipv6 interface, show ipv6 route, show ipv6 neighbors, show ipv6 access-list)?', // ---- ipv6
     };
     return byObj[f.objectives[0]] || 'Start where the user is: reproduce the symptom, then test one layer at a time.';
   }
