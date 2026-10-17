@@ -4,6 +4,7 @@ import { longIf, macCisco } from '../engine/model.js';
 import { carries, stpDisabled, stpRecord, bridgePriority, portCost, knowsVlan, allVlans } from '../engine/switching.js';
 import { l3Ifaces, describeAddr, hostAddr, lookup } from '../engine/routing.js';
 import { wallClock } from '../engine/engine.js';
+import { ospfInterfaceLines, routerOspfConfig, lineConfig, ospfRouteText, ospfRouteEntry, ifBwMtu } from './ios-ospf.js'; // ---- ospf (Act II)
 
 const pad = (s, n) => String(s).padEnd(n);
 const lpad = (s, n) => String(s).padStart(n);
@@ -58,8 +59,10 @@ export function interfaceConfig(d, name) {
   const body = [`interface ${longIf(name)}`];
   if (s) {
     if (s.description) body.push(` description ${s.description}`);
+    if (s.bw) body.push(` bandwidth ${s.bw}`);
     if (s.vlan !== null) body.push(` encapsulation dot1Q ${s.vlan}${s.native ? ' native' : ''}`);
     if (s.ip) body.push(` ip address ${fmtIp(s.ip.addr)} ${fmtMask(s.ip.len)}`);
+    if (s.mtu) body.push(` ip mtu ${s.mtu}`);
     for (const h of s.helpers || []) body.push(` ip helper-address ${fmtIp(h)}`);
     if (s.relayTrust) body.push(' ip dhcp relay information trusted');
     if (s.aclIn) body.push(` ip access-group ${s.aclIn} in`);
@@ -67,6 +70,7 @@ export function interfaceConfig(d, name) {
     if (s.ip && !s.proxyArp) body.push(' no ip proxy-arp');
     if (s.unreachables === false) body.push(' no ip unreachables');
     if (s.nat) body.push(` ip nat ${s.nat}`);
+    body.push(...ospfInterfaceLines(s));
     if (!s.adminUp) body.push(' shutdown');
     return body;
   }
@@ -87,14 +91,17 @@ export function interfaceConfig(d, name) {
     if (p.bpduguard) body.push(' spanning-tree bpduguard enable');
     if (p.snoopTrust) body.push(' ip dhcp snooping trust');
   } else if (d.kind === 'router' && p.kind === 'eth') {
+    if (p.bw) body.splice(p.description ? 2 : 1, 0, ` bandwidth ${p.bw}`);
     if (p.ip) body.push(` ip address ${fmtIp(p.ip.addr)} ${fmtMask(p.ip.len)}`);
     else body.push(' no ip address');
+    if (p.mtu) body.push(` ip mtu ${p.mtu}`);
     for (const h of p.helpers || []) body.push(` ip helper-address ${fmtIp(h)}`);
     if (p.relayTrust) body.push(' ip dhcp relay information trusted');
     if (p.aclIn) body.push(` ip access-group ${p.aclIn} in`);
     if (p.aclOut) body.push(` ip access-group ${p.aclOut} out`);
     if (p.ip && !p.proxyArp) body.push(' no ip proxy-arp');
     if (p.nat) body.push(` ip nat ${p.nat}`);
+    body.push(...ospfInterfaceLines(p));
     if (!p.adminUp) body.push(' shutdown');
     body.push(` duplex ${p.duplex}`, ` speed ${p.speed}`);
   }
@@ -114,7 +121,9 @@ export function runningConfig(eng, d) {
   L.push('Building configuration...', '');
   const body = [];
   body.push('!', `! Last configuration change at ${String(w.hh).padStart(2, '0')}:${String(w.mm).padStart(2, '0')}:${String(w.ss).padStart(2, '0')} UTC ${w.dow.slice(0, 3)} ${w.mon} ${w.day} ${w.year}`, '!');
-  body.push(d.kind === 'router' ? 'version 15.7' : 'version 17.9', 'service timestamps debug datetime msec', 'service timestamps log datetime msec', 'no service password-encryption', '!', `hostname ${d.hostname}`, '!', 'no ip domain lookup', '!');
+  body.push(d.kind === 'router' ? 'version 15.7' : 'version 17.9', 'service timestamps debug datetime msec', 'service timestamps log datetime msec', 'no service password-encryption', '!', `hostname ${d.hostname}`, '!', 'no ip domain lookup', 'ip domain name ops.example', '!');
+  // ---- ospf (Act II): the local account and SSH server the vty lines rely on (type 9 = scrypt secret; placeholder hash)
+  body.push('username admin privilege 15 secret 9 $9$nhEmQVczB7dqsO$X.HsgL6x1il0RxkOSSvyQYwucySCt7qFm4v7pqCxkKM', '!', 'ip ssh version 2', '!');
   if (d.relayTrustAll) body.push('ip dhcp relay information trust-all', '!');
   if (d.kind === 'switch') {
     if (d.snoop.vlans.length) body.push(`ip dhcp snooping vlan ${fmtRangeList(d.snoop.vlans)}`);
@@ -138,6 +147,7 @@ export function runningConfig(eng, d) {
   }
   if (d.kind === 'switch') body.push('interface Vlan1', ' no ip address', ' shutdown', '!');
   if (d.kind === 'router') {
+    body.push(...routerOspfConfig(d)); // ---- ospf (Act II)
     for (const r of d.nat) body.push(`ip nat inside source list ${r.acl} interface ${longIf(r.iface)}${r.overload ? ' overload' : ''}`);
     for (const r of d.routes) body.push(`ip route ${fmtIp(r.net)} ${fmtMask(r.len)} ${r.iface ? longIf(r.iface) + (r.nh !== null && r.nh !== undefined ? ' ' + fmtIp(r.nh) : '') : fmtIp(r.nh)}${r.ad && r.ad !== 1 ? ' ' + r.ad : ''}`);
     body.push('!');
@@ -151,7 +161,7 @@ export function runningConfig(eng, d) {
       body.push('!');
     }
   }
-  body.push('line con 0', ' logging synchronous', 'line vty 0 4', ' login local', ' transport input ssh', '!', 'end');
+  body.push(...lineConfig(d), 'end');
   const bytes = body.join('\n').length;
   L.push(`Current configuration : ${bytes} bytes`, ...body);
   return L;
@@ -218,7 +228,7 @@ export function showInterface(eng, d, name) {
       `  Hardware is PQ3_TSEC, address is ${macCisco(parent.mac)} (bia ${macCisco(parent.mac)})`,
       sub.description ? `  Description: ${sub.description}` : null,
       sub.ip ? `  Internet address is ${fmtIp(sub.ip.addr)}/${sub.ip.len}` : '  Internet address is unassigned',
-      '  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,',
+      `  MTU 1500 bytes, BW ${ifBwMtu(sub, name).bw} Kbit/sec, DLY 10 usec,`,
       '     reliability 255/255, txload 1/255, rxload 1/255',
       `  Encapsulation 802.1Q Virtual LAN, Vlan ID  ${sub.vlan}.`,
       '  ARP type: ARPA, ARP Timeout 04:00:00',
@@ -236,7 +246,7 @@ export function showInterface(eng, d, name) {
   ];
   if (p.description) L.push(`  Description: ${p.description}`);
   if (p.ip) L.push(`  Internet address is ${fmtIp(p.ip.addr)}/${p.ip.len}`);
-  L.push('  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,', '     reliability 255/255, txload 1/255, rxload 1/255', '  Encapsulation ARPA, loopback not set', '  Keepalive set (10 sec)');
+  L.push(`  MTU 1500 bytes, BW ${ifBwMtu(p, name).bw} Kbit/sec, DLY 10 usec,`, '     reliability 255/255, txload 1/255, rxload 1/255', '  Encapsulation ARPA, loopback not set', '  Keepalive set (10 sec)');
   if (st.up) {
     const dup = st.duplex === 'full' ? 'Full-duplex' : 'Half-duplex';
     L.push(`  ${dup}, ${st.speed}Mb/s, media type is 10/100/1000BaseTX`);
@@ -470,7 +480,8 @@ export function showIpRoute(eng, d, only = null) {
   ];
   const def = table.find(r => r.len === 0);
   L.push(def ? `Gateway of last resort is ${fmtIp(def.nh ?? 0)} to network 0.0.0.0` : 'Gateway of last resort is not set', '');
-  if (def) L.push(`S*    0.0.0.0/0 ${staticVia(def)}`);
+  if (def && def.type === 'O') L.push(`${def.code.padEnd(6)}0.0.0.0/0 ${ospfRouteText(eng, def)}`);
+  else if (def) L.push(`S*    0.0.0.0/0 ${staticVia(def)}`);
   const groups = new Map();
   for (const r of table) {
     if (r.len === 0) continue;
@@ -480,13 +491,16 @@ export function showIpRoute(eng, d, only = null) {
     groups.get(k).routes.push(r);
   }
   for (const { c, routes } of [...groups.values()].sort((a, b) => a.c.net - b.c.net)) {
-    const masks = new Set(routes.map(r => r.len));
-    if (masks.size > 1) L.push(`      ${fmtIp(c.net)}/${c.len} is variably subnetted, ${routes.length} subnets, ${masks.size} masks`);
-    else L.push(`      ${fmtIp(c.net)}/${[...masks][0]} is subnetted, ${routes.length} subnets`);
+    // the header describes the whole major network in the table, also in a filtered view (show ip route ospf)
+    const inMajor = all.filter(r => r.len !== 0 && classfulOf(r.net).net === c.net && classfulOf(r.net).len === c.len);
+    const masks = new Set(inMajor.map(r => r.len));
+    if (masks.size > 1) L.push(`      ${fmtIp(c.net)}/${c.len} is variably subnetted, ${inMajor.length} subnets, ${masks.size} masks`);
+    else L.push(`      ${fmtIp(c.net)}/${[...masks][0]} is subnetted, ${inMajor.length} subnets`);
     routes.sort((a, b) => a.net - b.net || a.len - b.len);
     for (const r of routes) {
       const pfx = masks.size > 1 ? `${fmtIp(r.net)}/${r.len}` : fmtIp(r.net);
       if (r.type === 'S') L.push(`S        ${pfx} ${staticVia(r)}`);
+      else if (r.type === 'O') L.push(`${r.code.padEnd(9)}${pfx} ${ospfRouteText(eng, r)}`);
       else L.push(`${r.type}        ${pfx} is directly connected, ${longIf(r.iface)}`);
     }
   }
@@ -497,6 +511,7 @@ export function showIpRoute(eng, d, only = null) {
 export function showIpRouteEntry(eng, d, ip) {
   const best = lookup(eng.routes(d.id).table, ip);
   if (!best) return ['% Network not in table'];
+  if (best.type === 'O') return ospfRouteEntry(eng, d, best);
   const pfx = best.len === 0 ? '0.0.0.0/0, supernet' : `${fmtIp(best.net)}/${best.len}`;
   const via = best.nh !== null && best.nh !== undefined ? `${fmtIp(best.nh)}${best.exitIf ? `, via ${longIf(best.iface)}` : ''}` : `directly connected, via ${longIf(best.iface)}`;
   const known = best.type === 'S'
@@ -517,7 +532,7 @@ export function showIpInterface(eng, d, name) {
     L.push(`${longIf(n)} is ${admin ? 'administratively down' : st.up ? 'up' : 'down'}, line protocol is ${!admin && st.up ? 'up' : 'down'}`);
     if (!c.ip) { L.push('  Internet protocol processing disabled'); continue; }
     const helpers = c.helpers || [];
-    L.push(`  Internet address is ${fmtIp(c.ip.addr)}/${c.ip.len}`, '  Broadcast address is 255.255.255.255', '  Address determined by non-volatile memory', '  MTU is 1500 bytes');
+    L.push(`  Internet address is ${fmtIp(c.ip.addr)}/${c.ip.len}`, '  Broadcast address is 255.255.255.255', '  Address determined by non-volatile memory', `  MTU is ${ifBwMtu(c, n).mtu} bytes`);
     if (!helpers.length) L.push('  Helper address is not set');
     else L.push(`  Helper address${helpers.length > 1 ? 'es are' : ' is'} ${fmtIp(helpers[0])}`, ...helpers.slice(1).map(h => `${' '.repeat(helpers.length > 1 ? 23 : 20)}${fmtIp(h)}`));
     L.push('  Directed broadcast forwarding is disabled',

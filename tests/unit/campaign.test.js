@@ -18,6 +18,8 @@ const VERIFY = {
   M08: run => run('CORE-SRV', 'dhcp-lease-list'),
   M09: run => run('DISPATCH-01', 'pathping backup.example.net'),
   M10: run => { run('GUEST-KIOSK', 'ipconfig /renew'); run('GUEST-KIOSK', 'curl https://portal.example.net/'); },
+  // ---- ospf (Act II): both directions, the branch side over SSH from the NOC (the branch PC runs OpenSSH Server)
+  M12: run => { run('DISPATCH-01', 'ping 10.43.10.50'); run('DISPATCH-01', 'ssh admin@10.43.10.50', 'nightshift', 'curl https://clinic.ops.example/health', 'exit'); },
 };
 
 function fresh() {

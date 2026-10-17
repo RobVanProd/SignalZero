@@ -10,6 +10,7 @@ import { parseDhcpd } from '../engine/parsers/dhcpd.js';
 import { parseZone } from '../engine/parsers/zone.js';
 import { parseIp } from '../engine/ipv4.js';
 import { net } from './district.js';
+import { ospfIfaces } from '../engine/ospf.js'; // ---- ospf (Act II)
 
 /** Interface token in canonical short form: g0/1, gi0/1, GigabitEthernet0/1 -> g0/1. */
 function ifTok(t) {
@@ -254,5 +255,79 @@ export const COACH = {
     },
   ],
 };
+
+// ---- ospf (Act II): M12 is the learner's first contact with a routing protocol and with in-band management, so it
+// is coached in small steps like incidents 1-4. Commands typed on BRANCH-RTR go through the SSH session opened in the
+// EDGE-RTR console, so those steps point at (and fill the prompt of) the EDGE-RTR console; they are ticked by what ran
+// on BRANCH-RTR.
+const wanIf = (eng, dev, name) => ospfIfaces(eng, eng.s.devices[dev]).find(i => i.name === name) || null;
+function timersMatch(eng) {
+  const a = wanIf(eng, 'EDGE-RTR', 'Gi0/3');
+  const b = wanIf(eng, 'BRANCH-RTR', 'Gi0/0');
+  return !!a && !!b && a.hello === b.hello && a.dead === b.dead && a.area === b.area;
+}
+const ranRoute = (c, dev) => c.ran(dev, l => /^\s*(do\s+)?sh\w*\s+ip\s+ro\w*\s+\d/i.test(l));
+
+COACH.M12 = [
+  {
+    id: 'nbr', title: 'Look for an OSPF neighbour', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ip ospf neighbor' },
+    how: 'Open the EDGE-RTR console in RACK A. Type enable, then show ip ospf neighbor.',
+    done: c => c.ran('EDGE-RTR', l => iosIs(l, 'show ip ospf neighbor')),
+    learned: 'Only a header, no rows: EDGE-RTR has no OSPF neighbour, although Gi0/3 to the carrier is up. OSPF routers learn routes only from neighbours, and two routers become neighbours only when their hello packets agree on area, subnet and mask, and on the hello and dead timers.',
+  },
+  {
+    id: 'if-edge', title: 'Read the clinic end\'s OSPF settings', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ip ospf interface g0/3' },
+    how: 'Type show ip ospf interface g0/3.',
+    done: c => c.ran('EDGE-RTR', l => iosIs(l, 'show ip ospf interface g0/3')),
+    learned: 'Area 0, network type BROADCAST, Cost: 1, and "Timer intervals configured, Hello 10, Dead 40": the defaults. The cost is the 100 Mb/s reference bandwidth divided by the interface bandwidth (1000 Mb/s), rounded down and never below 1. "Neighbor Count is 0". Now look at the other end of the circuit.',
+  },
+  {
+    id: 'ssh', title: 'Log in to the branch router over SSH', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'ssh -l admin 172.16.42.2' },
+    how: 'BRANCH-RTR is at the branch, 6 km away: no console cable. EDGE-RTR shares the /30 with it (172.16.42.0/30), so connect from here: ssh -l admin 172.16.42.2. At "Password:" type the lab password nightshift and press Enter.',
+    done: c => c.ev(e => e.type === 'ssh' && e.stage === 'login' && e.ok && e.target === 'BRANCH-RTR'),
+    learned: 'The prompt reads BRANCH-RTR#: you are on the branch router, inside the EDGE-RTR console window. SSH (TCP 22) is in-band management: it travels over the network you are repairing. From DISPATCH-01 it would time out, because the branch has no route back to the clinic VLAN yet; EDGE-RTR gets an answer because it talks from its own address on the shared /30.',
+  },
+  {
+    id: 'if-branch', title: 'Read the branch end\'s OSPF settings', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ip ospf interface g0/0' },
+    how: 'Still at the BRANCH-RTR# prompt, type show ip ospf interface g0/0 (Gi0/0 is the branch router\'s WAN port).',
+    done: c => c.ran('BRANCH-RTR', l => iosIs(l, 'show ip ospf interface g0/0')),
+    learned: '"Hello 5, Dead 20": the contractor\'s "faster failover" tweak, made on this end only. Setting the hello interval also set the dead interval to four times the hello. Each router discards hellos whose timers differ from its own, so neither one ever lists the other as a neighbour.',
+  },
+  {
+    id: 'fix-timers', title: 'Make the timers match', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'configure terminal' },
+    how: 'On BRANCH-RTR type, one per line: configure terminal · interface g0/0 · no ip ospf hello-interval · end. (Setting the same timers on EDGE-RTR Gi0/3 would also work: what matters is that both ends agree.)',
+    done: c => timersMatch(c.eng),
+    learned: 'Both ends now send hello every 10 s and declare a neighbour dead after 40 s. The next hellos are accepted, and the neighbour moves through INIT, 2WAY, EXSTART, EXCHANGE and LOADING to FULL within a few seconds.',
+  },
+  {
+    id: 'full', title: 'Watch the adjacency come up', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ip ospf neighbor' },
+    how: 'Wait a few seconds, then type show ip ospf neighbor on BRANCH-RTR. Repeat until the State column reads FULL.',
+    done: c => c.goal(0),
+    learned: '"FULL/BDR": both routers now hold the same link-state database. On Ethernet one router is elected DR (highest priority, then highest router ID: here the branch, 10.43.255.1) and the other BDR. The Dead Time column counts down from 40 and resets with every hello. If four hellos in a row are lost, the neighbour is declared dead: that is how long a silent failure (a cut beyond the carrier\'s box, where the port stays up) takes to detect with default timers.',
+  },
+  {
+    id: 'route', title: 'Ask the clinic router how it reaches the branch', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ip route 10.43.10.50' },
+    how: 'Type exit to close the SSH session (the prompt returns to EDGE-RTR#), then show ip route 10.43.10.50.',
+    done: c => c.goal(0) && ranRoute(c, 'EDGE-RTR'),
+    learned: 'Known via "static", distance 1, via 10.42.10.254: a test router from last week\'s acceptance test, long gone. OSPF has learned 10.43.10.0/24 (show ip ospf database lists it), but for the same prefix the route with the lower administrative distance wins: connected 0, static 1, OSPF 110. Replies to the branch are sent to a router that no longer exists.',
+  },
+  {
+    id: 'fix-static', title: 'Remove the stale static route', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'configure terminal' },
+    how: 'On EDGE-RTR type, one per line: configure terminal · no ip route 10.43.10.0 255.255.255.0 10.42.10.254 · end',
+    done: c => c.goal(1),
+    learned: 'With the static gone, the OSPF route is installed: the routing table takes the best remaining source for the prefix.',
+  },
+  {
+    id: 'ospf-route', title: 'Read the OSPF route', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ip route ospf' },
+    how: 'Type show ip route ospf.',
+    done: c => c.goal(1) && c.ran('EDGE-RTR', l => iosIs(l, 'show ip route ospf')),
+    learned: '"O IA 10.43.10.0/24 [110/2] via 172.16.42.2, …, GigabitEthernet0/3": O = OSPF and IA = inter-area (the branch LAN is in area 1, behind BRANCH-RTR, which joins area 1 to the backbone area 0 as an area border router). [110/2] = administrative distance 110, cost 2 (1 for EDGE-RTR Gi0/3 plus 1 for the branch LAN), then the next hop, the route\'s age and the exit interface.',
+  },
+  {
+    id: 'verify', title: 'Prove it from both ends', where: 'DISPATCH-01', cmd: { dev: 'DISPATCH-01', text: 'ping 10.43.10.50' },
+    how: 'At DISPATCH-01: ping 10.43.10.50. Then ssh admin@10.43.10.50 (password nightshift, the branch PC runs Windows OpenSSH Server for remote support) and, on the branch PC, curl https://clinic.ops.example/health.',
+    done: () => false, learned: '',
+  },
+];
 
 export function coachSteps(missionId) { return COACH[missionId] || null; }

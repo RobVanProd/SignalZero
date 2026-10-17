@@ -15,6 +15,8 @@ export const ARG_TYPES = {
   WORD: { help: 'WORD', parse: t => t },
   LINE: { help: 'LINE  Up to 240 characters', parse: t => t, rest: true },
   NH: { help: 'A.B.C.D  Forwarding router\'s address | Interface', parse: t => parseIp(t) ?? canonIf(t) },
+  // ---- ospf (Act II): OSPF area ID, decimal or dotted; the text is kept because IOS shows it as entered
+  AREA: { help: '<0-4294967295>  OSPF area ID as a decimal value | A.B.C.D  OSPF area ID in IP address format', parse: t => (/^\d+$/.test(t) && Number(t) <= 4294967295 ? { area: Number(t), text: String(Number(t)) } : parseIp(t) !== null ? { area: parseIp(t), text: t } : null) },
 };
 
 export function tokenize(line) {

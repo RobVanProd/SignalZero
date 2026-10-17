@@ -2,11 +2,13 @@
 // actually flow / is it actually blocked?), never a check of one specific config line, so any correct
 // fix passes and a "fix" that breaks something else fails the constraints.
 import { parseIp as ip, inSubnet, fmtIp } from '../engine/ipv4.js';
-import { hostAddr, l3Ifaces } from '../engine/routing.js';
+import { hostAddr, l3Ifaces, lookup } from '../engine/routing.js';
 import { httpRequest, dhcpDryRun, dhcpClient, applyDhcpResult } from '../engine/services.js';
 import { device, addPort, link } from '../engine/model.js';
-import { net, patchConnect, dhcpdConf, zoneFile } from './district.js';
+import { net, patchConnect, dhcpdConf, zoneFile, bnet, routerIds, BRANCH } from './district.js';
 import { createSession, execute, saveFile } from '../cli/index.js';
+import { neighborState, ospfIfaces, newOspfProcess, sortNetworks } from '../engine/ospf.js'; // ---- ospf (Act II)
+import { LAB_LOGIN } from '../cli/ssh.js';
 
 const A = (eng, role, host) => ip(net(eng.s.params, role, host));
 const V = (eng, role) => eng.s.params.vlans[role];
@@ -54,6 +56,9 @@ export function flowDefs(eng) {
     staff: { id: 'staff', label: 'Staff laptops → records', from: 'STAFF-LAPTOP', kind: 'http', url: 'https://clinic.ops.example/health', district: 'ward' },
     cams: { id: 'cams', label: 'Cameras → video recorder', from: 'CAMERAS', kind: 'fleet', dst: A(eng, 'clinic', 30), proto: 'tcp', port: 554, district: 'security' },
     voice: { id: 'voice', label: 'Dispatch voice line', from: 'VOIP-PHONE', kind: 'voice', dst: ip('203.0.113.50'), port: 5060, district: 'voice' },
+    // ---- ospf (Act II): the branch clinic over the private WAN
+    branch: { id: 'branch', label: 'Branch clinic → clinic records', from: 'BRANCH-PC', kind: 'http', url: 'https://clinic.ops.example/health', district: 'branch' },
+    'branch-share': { id: 'branch-share', label: 'Dispatch → branch file share', from: 'DISPATCH-01', kind: 'probe', dst: ip(bnet(eng.s.params, 50)), proto: 'tcp', port: 445, district: 'branch' },
   };
 }
 
@@ -529,6 +534,87 @@ export const MISSIONS = [
       const run = cli(eng);
       run('ACCESS-SW', 'enable', 'configure terminal', 'ip dhcp snooping', `ip dhcp snooping vlan ${V(eng, 'guest')}`, 'no ip dhcp snooping information option', 'interface g0/1', 'ip dhcp snooping trust', 'end');
       run('GUEST-KIOSK', 'ipconfig /release', 'ipconfig /renew');
+    },
+  },
+
+  // ------------------------------------------------------------------------------------------ ACT II
+  // ---- ospf (Act II): M12, dynamic routing to the branch clinic
+  {
+    id: 'M12', act: 2, code: 'ROUTING · OSPF', title: 'THE BRANCH CLINIC',
+    objectives: ['2.1', '1.6', '5.3', '5.5', '3.5'],
+    station: 'router',
+    brief: `Tonight the branch clinic (site 43) joins the network over a new private WAN circuit: EDGE-RTR Gi0/3, the carrier's metro-Ethernet service, then BRANCH-RTR. A contractor configured OSPF on both routers this evening and left a note on the change ticket: "branch side tuned for faster failover". The branch has internet, but its reception PC cannot open clinic records, and dispatch cannot reach the branch PC's file share. BRANCH-RTR is 6 km away: there is no console cable, only SSH (lab login ${LAB_LOGIN.user} / ${LAB_LOGIN.password}).`,
+    task: 'Get OSPF running between EDGE-RTR and BRANCH-RTR, make sure each site learns the other\'s networks and actually forwards on them, and prove it from both ends: the branch PC opens the records app and dispatch reaches the branch PC.',
+    radioStart: 'Branch reception says the records app just spins. Their internet works, so the router is up. Start on EDGE-RTR: is there an OSPF neighbour on Gi0/3?',
+    radioWin: 'The branch is on the records app and dispatch can open their share. The WAN is yours now.',
+    setup(eng) {
+      const p = eng.s.params;
+      const rid = routerIds(p);
+      const edge = eng.s.devices['EDGE-RTR'];
+      const br = eng.s.devices['BRANCH-RTR'];
+      const area0 = { area: 0, text: '0' };
+      const stmt = (addr, wild, a) => ({ addr: ip(addr), wild: ip(wild), ...a });
+      // Acceptance testing last week: a temporary route to the branch LAN through the contractor's LTE test router on
+      // the clinic VLAN (the router has since been taken away). Same as "ip route 10.43.10.0 255.255.255.0 10.42.10.254".
+      edge.routes.push({ net: ip(bnet(p, 0)), len: 24, nh: ip(net(p, 'clinic', 254)), iface: null, ad: 1 });
+      eng.mutated(`EDGE-RTR: ip route ${bnet(p, 0)} 255.255.255.0 ${net(p, 'clinic', 254)} (acceptance test, CHG-3290)`, 'contractor');
+      // Tonight's change (CHG-3307), as typed by the contractor:
+      //   EDGE-RTR   interface g0/3 / description ... / ip address 172.16.42.1 255.255.255.252 / no ip proxy-arp / no shutdown
+      //              router ospf 1 / router-id 10.42.255.1 / passive-interface default / no passive-interface g0/3
+      //              network 10.42.10.0 0.0.0.255 area 0 / network 172.16.42.0 0.0.0.3 area 0
+      //   BRANCH-RTR interface g0/0 / ip ospf hello-interval 5      <- "tuned for faster failover", this end only
+      //              router ospf 1 / router-id 10.43.255.1 / passive-interface g0/2
+      //              network 10.43.10.0 0.0.0.255 area 1 / network 172.16.42.0 0.0.0.3 area 0
+      Object.assign(edge.ports['Gi0/3'], { description: 'PRIVATE WAN to BRANCH-RTR (EVC MEF-42-0043)', ip: { addr: ip(BRANCH.edgeWan), len: 30 }, proxyArp: false, adminUp: true });
+      edge.ospf = { ...newOspfProcess(1), rid: ip(rid.edge), passiveDefault: true, active: ['Gi0/3'], nets: sortNetworks([stmt(net(p, 'clinic', 0), '0.0.0.255', area0), stmt(BRANCH.wanNet, '0.0.0.3', area0)]) };
+      br.ports['Gi0/0'].ospf = { hello: 5 };
+      br.ospf = { ...newOspfProcess(1), rid: ip(rid.branch), passive: ['Gi0/2'], nets: sortNetworks([stmt(bnet(p, 0), '0.0.0.255', { area: 1, text: '1' }), stmt(BRANCH.wanNet, '0.0.0.3', area0)]) };
+      eng.mutated('EDGE-RTR + BRANCH-RTR: private WAN up, OSPF process 1 (CHG-3307, "branch side tuned for faster failover")', 'contractor');
+      enableFlows(eng, ['branch', 'branch-share']);
+      eng.advance(45);
+      // services that work now must still work after the fix (collateral-damage constraint)
+      eng.evaluateFlows();
+      (eng.s.flowBaseline ||= {}).M12 = eng.s.flows.filter(f => !f.id.startsWith('branch') && eng.s.flowState[f.id]?.ok).map(f => f.id);
+    },
+    goals: [
+      { label: 'OSPF adjacency EDGE-RTR ↔ BRANCH-RTR is FULL on both ends', check: eng => neighborState(eng, eng.s.devices['EDGE-RTR'], 'BRANCH-RTR') === 'FULL' && neighborState(eng, eng.s.devices['BRANCH-RTR'], 'EDGE-RTR') === 'FULL' },
+      { label: 'EDGE-RTR forwards to the branch LAN on its OSPF route', check: eng => lookup(eng.routes('EDGE-RTR').table, ip(bnet(eng.s.params, 50)))?.type === 'O' },
+      { label: 'BRANCH-RTR forwards to the clinic VLAN on its OSPF route', check: eng => lookup(eng.routes('BRANCH-RTR').table, A(eng, 'clinic', 20))?.type === 'O' },
+      { label: 'BRANCH-PC opens https://clinic.ops.example/health', check: eng => httpOk(eng, 'BRANCH-PC', 'https://clinic.ops.example/health') },
+      { label: 'DISPATCH-01 reaches the branch file share (TCP 445)', check: eng => reaches(eng, 'DISPATCH-01', ip(bnet(eng.s.params, 50)), 'tcp', 445) },
+    ],
+    constraints: [
+      { label: 'Clinic internet still works (backup API)', check: eng => httpOk(eng, 'CORE-SRV', 'https://backup.example.net/health') },
+      { label: 'Every service that worked before the change still works', check: eng => { eng.evaluateFlows(); return (eng.s.flowBaseline?.M12 || []).every(id => eng.s.flowState[id]?.ok); } },
+    ],
+    evidence: [
+      { label: 'Branch → clinic: from BRANCH-PC (ssh admin@10.43.10.50 from DISPATCH-01) curl the clinic health check (200), or ping 10.42.10.20 from BRANCH-RTR with "source g0/2"', match: ev => (ev.type === 'http' && ev.host === 'BRANCH-PC' && /clinic\.ops\.example/.test(ev.url) && ev.status === 200) || (ev.type === 'ping' && ev.host === 'BRANCH-RTR' && ev.ok && ev.src !== undefined && (ev.src >>> 8) === (ip('10.43.10.0') >>> 8)) },
+      { label: 'Clinic → branch: ping the branch PC 10.43.10.50 from DISPATCH-01', match: ev => ev.type === 'ping' && ev.host === 'DISPATCH-01' && ev.ok && ev.ip === ip('10.43.10.50') },
+    ],
+    hints: [
+      `On EDGE-RTR: "show ip ospf neighbor" lists nobody, although "show ip interface brief" says Gi0/3 is up/up. Look at the far end too. BRANCH-RTR has no console here, but EDGE-RTR sits on the same /30, so from the EDGE-RTR console: "ssh -l ${LAB_LOGIN.user} ${BRANCH.branchWan}" (password ${LAB_LOGIN.password}). "exit" brings you back. From DISPATCH-01 it times out: the branch has no route back to the clinic yet.`,
+      'OSPF neighbours must agree on area, subnet and mask, and on the hello and dead intervals. Compare "show ip ospf interface g0/3" on EDGE-RTR with "show ip ospf interface g0/0" on BRANCH-RTR and read the "Timer intervals configured" line. Once the neighbour is FULL, ask EDGE-RTR how it reaches the branch: "show ip route 10.43.10.50". A static route has administrative distance 1, OSPF 110: for the same prefix the lower distance wins.',
+      `On EDGE-RTR: "ssh -l ${LAB_LOGIN.user} ${BRANCH.branchWan}", password ${LAB_LOGIN.password}, then on BRANCH-RTR: "configure terminal", "interface g0/0", "no ip ospf hello-interval", "end" (hello 10 / dead 40 again, like EDGE-RTR). Wait about 15 s: "show ip ospf neighbor" shows FULL. Type "exit" to return to EDGE-RTR. There "show ip route 10.43.10.50" still says Known via "static": remove the test route with "configure terminal", "no ip route 10.43.10.0 255.255.255.0 10.42.10.254", "end". A few seconds later "show ip route ospf" lists O IA 10.43.10.0/24. Verify: "ping 10.43.10.50" on DISPATCH-01, then "ssh admin@10.43.10.50" there and "curl https://clinic.ops.example/health" on the branch PC.`,
+    ],
+    debrief: {
+      failure: 'Two faults stacked. The contractor put "ip ospf hello-interval 5" on BRANCH-RTR Gi0/0 only, which also lowered its dead interval to 20 s (4 × hello) while EDGE-RTR kept 10/40. OSPF discards hellos with different timers, so no neighbour ever formed. Behind that, a static route left over from acceptance testing (10.43.10.0/24 via the LTE test router 10.42.10.254, long gone) had administrative distance 1 and beat the OSPF route (110) as soon as OSPF learned it, so replies to the branch died at EDGE-RTR.',
+      evidence: '"show ip ospf neighbor" was empty on both routers although the link was up; "show ip ospf interface" read Hello 5, Dead 20 at the branch and Hello 10, Dead 40 at the clinic. After the fix the neighbour went INIT, 2WAY, EXSTART, EXCHANGE, LOADING, FULL ("%OSPF-5-ADJCHG ... from LOADING to FULL, Loading Done"), yet "show ip route 10.43.10.50" said Known via "static", distance 1, and ARP for 10.42.10.254 went unanswered. "show ip ospf database" already held the branch summary LSA for 10.43.10.0: OSPF knew the route, the routing table preferred the static.',
+      fix: 'Make the hello and dead intervals match on both ends (remove the branch override, or configure the same values on EDGE-RTR Gi0/3), then remove the stale static route (or turn it into a floating static with a distance above 110). Verify both directions the way users see them: the branch PC opens the records app and dispatch reaches the branch PC.',
+      why: 'OSPF neighbours must agree on area ID, subnet and mask (on broadcast links), hello and dead intervals and authentication, and on MTU for the database exchange. A mismatch simply means no neighbour, so you compare both ends with show ip ospf interface (or debug ip ospf hello). The dead interval is also how long a silent failure takes to detect: if the carrier circuit breaks beyond the NTE, EDGE-RTR\'s port stays up and it keeps routing into the dead circuit until four hellos are missed (40 s by default, plus the 5 s SPF delay); the branch side, whose port went down, drops the neighbour at once. Route selection is longest prefix first, then administrative distance (connected 0, static 1, OSPF 110), then the protocol\'s own metric. OSPF cost = 100 Mb/s reference ÷ interface bandwidth, so every link of 100 Mb/s and faster costs 1 unless you raise the reference with auto-cost reference-bandwidth on every router.',
+      real: ['Cisco: show ip ospf neighbor · show ip ospf interface [brief] · show ip ospf database · show ip route ospf · show ip protocols · debug ip ospf hello', 'Neighbour states: DOWN, INIT (heard a hello), 2WAY (found itself in the neighbour\'s hello), EXSTART/EXCHANGE (database description), LOADING, FULL. On Ethernet only the DR and BDR go FULL with every router; two DROTHERs stay 2WAY.', 'SSH (TCP 22) is in-band management: it rides the production network, so a routing or ACL change on the far end can cut your own session. Keep a second path (or an out-of-band console) before changing a remote router, and restrict vty access (access-class) to management networks.', 'Faster failure detection: tune hello/dead on both ends (for example 1/4), or use BFD where the platform supports it.'],
+      pitfalls: ['Changing OSPF timers on one end only: the adjacency drops and never comes back.', 'Leaving test routes behind: an AD-1 static silently beats any dynamic route for the same prefix.', 'Ethernet adds the wait timer: a freshly connected broadcast link waits about 40 s (the dead interval) before the DR election and the adjacency; "ip ospf network point-to-point" on both ends skips the election on a two-router link.', 'Expecting a 10 Gb/s link to cost less than 1 Gb/s with the default 100 Mb/s reference bandwidth: both cost 1.'],
+    },
+    outcome(eng) {
+      const I = ospfIfaces(eng, eng.s.devices['EDGE-RTR']).find(x => x.name === 'Gi0/3');
+      const dead = I?.dead ?? 40;
+      return { method: dead === 40 ? 'Matched the OSPF timers at the defaults (hello 10 s, dead 40 s): a silent failure is detected within 40 s' : `Tuned both ends to hello ${I.hello} s, dead ${dead} s: a silent failure is detected within ${dead} s`, detection: dead };
+    },
+    reference(eng) {
+      const p = eng.s.params;
+      const run = cli(eng);
+      run('BRANCH-RTR', 'enable', 'configure terminal', 'interface g0/0', 'no ip ospf hello-interval', 'end');
+      run('EDGE-RTR', 'enable', 'configure terminal', `no ip route ${bnet(p, 0)} 255.255.255.0 ${net(p, 'clinic', 254)}`, 'end');
+      eng.advance(40);
     },
   },
 ];

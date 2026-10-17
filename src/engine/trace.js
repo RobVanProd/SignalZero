@@ -61,8 +61,10 @@ function pathImpairment(eng, path) {
 }
 
 /** What a router does with a packet addressed to one of its own interfaces. */
-function routerService(pkt, ingress) {
+function routerService(pkt, ingress, dev) {
   if (pkt.proto === 'icmp') return 'echo';
+  // ---- ospf (Act II): IOS routers with SSH on their vty lines accept TCP 22 (access-class is checked by the session)
+  if (pkt.proto === 'tcp' && pkt.dport === 22 && dev?.os === 'ios' && (dev.vty?.transport ?? ['ssh']).includes('ssh')) return 'tcp-open';
   if (pkt.proto === 'tcp') return 'tcp-refused';
   return ingress?.cfg.unreachables === false ? 'filtered-host' : 'udp-closed';
 }
@@ -119,7 +121,7 @@ export function sendPacket(eng, opts) {
     const rt = eng.routes(src.id);
     if (l3Ifaces(eng, src).some(i => i.addr === pkt.dst && i.up)) {
       pkt.src = pkt.dst;
-      return { outcome: 'delivered', at: src.id, service: routerService(pkt, null), pkt, hops, notes, pass, latency, jitter, nat };
+      return { outcome: 'delivered', at: src.id, service: routerService(pkt, null, src), pkt, hops, notes, pass, latency, jitter, nat };
     }
     const r = lookup(rt.table, pkt.dst);
     if (!r) return fail('local-error', src.id, 'no-route');
@@ -179,7 +181,7 @@ export function sendPacket(eng, opts) {
       }
     }
     if (l3Ifaces(eng, cur).some(i => i.addr === pkt.dst && i.up)) {
-      return { outcome: 'delivered', at: cur.id, service: routerService(pkt, ingress), pkt, hops, notes, pass, latency, jitter, nat, ingress: ingress.name, ttl: pkt.ttl };
+      return { outcome: 'delivered', at: cur.id, service: routerService(pkt, ingress, cur), pkt, hops, notes, pass, latency, jitter, nat, ingress: ingress.name, ttl: pkt.ttl };
     }
     if (pkt.ttl <= 1) {
       return fail('ttl-exceeded', cur.id, 'TTL expired in transit', { icmpFrom: ingress.addr, ingress: ingress.name });

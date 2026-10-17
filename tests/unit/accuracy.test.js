@@ -286,7 +286,9 @@ test('valid IOS show/ping commands work or answer with a labelled training-image
   assert.match(ipint, /Inbound {2}access list is GUEST-IN/);
   assert.match(rt('ping 203.0.113.20 source 198.51.100.2'), /Packet sent with a source address of 198\.51\.100\.2[\s\S]*!!!!!/);
   assert.match(rt('ping 203.0.113.20 source g0/1.10'), /Packet sent with a source address of 10\.42\.10\.1[\s\S]*Success rate is 0 percent/, 'router-sourced traffic is not NATed');
-  for (const [dev, c] of [['ACCESS-SW', 'show spanning-tree interface g0/1'], ['ACCESS-SW', 'show ip dhcp snooping binding'], ['ACCESS-SW', 'show errdisable recovery'], ['EDGE-RTR', 'show ip protocols'], ['EDGE-RTR', 'show ip nat statistics']]) {
+  // "show ip protocols" is simulated since the OSPF build (Act II): with no routing protocol IOS prints only the NSF banner.
+  assert.match(rt('show ip protocols'), /^\*\*\* IP Routing is NSF aware \*\*\*$/m);
+  for (const [dev, c] of [['ACCESS-SW', 'show spanning-tree interface g0/1'], ['ACCESS-SW', 'show ip dhcp snooping binding'], ['ACCESS-SW', 'show errdisable recovery'], ['EDGE-RTR', 'show ip nat statistics']]) {
     const out = text(run(dev, c));
     assert.doesNotMatch(out, /Invalid input/, c);
     assert.match(out, /training image: .* is valid IOS but is not simulated here/, c);
