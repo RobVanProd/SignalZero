@@ -249,7 +249,7 @@ test('IPv6 ACLs: implicit nd-na / nd-ns permits before the implicit deny; an exp
 test('IOS running-config and show ipv6 route after the reference fix', () => {
   const { run } = solved();
   const rc = text(run('EDGE-RTR', 'enable', 'show running-config'));
-  assert.match(rc, /\nno ip domain lookup\nipv6 unicast-routing\n!/);
+  assert.match(rc, /\nno ip domain lookup\n(?:ip domain name \S+\n)?ipv6 unicast-routing\n!/);
   assert.match(rc, /interface GigabitEthernet0\/0\n(?: .*\n)* speed auto\n ipv6 address 2001:DB8:FFFF:1::2\/64\n!/);
   assert.match(rc, /\nipv6 route ::\/0 2001:DB8:FFFF:1::1\n!/);
   const rt = text(run('EDGE-RTR', 'show ipv6 route'));

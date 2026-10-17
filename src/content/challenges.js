@@ -4,7 +4,7 @@
 //   ->  the reference repair (applied to a copy) restores every check.
 import { Engine } from '../engine/engine.js';
 import { parseIp as ip, fmtIp } from '../engine/ipv4.js';
-import { buildDistrict, net, dhcpdConf, zoneFile, DEFAULT_PARAMS } from './district.js';
+import { buildDistrict, net, dhcpdConf, zoneFile, DEFAULT_PARAMS, bnet, BRANCH } from './district.js';
 import { MISSIONS, enableFlows, cli, httpOk, reaches } from './missions.js';
 import { dhcpClient, applyDhcpResult, dhcpdStop } from '../engine/services.js';
 import { saveFile } from '../cli/index.js';
@@ -56,7 +56,7 @@ export function buildHealthy(params) {
   eng.reindex();
   eng.mutated('maintenance window closed', 'system');
   eng.advance(35);
-  enableFlows(eng, ['clinic', 'backup', 'guest', 'isolation', 'nurse', 'staff', 'cams', 'voice', 'ipv6']);
+  enableFlows(eng, ['clinic', 'backup', 'guest', 'isolation', 'nurse', 'staff', 'cams', 'voice', 'ipv6', 'branch', 'branch-share']);
   eng.s.changeLog = [];
   eng.s.events = [];
   for (const d of Object.values(eng.s.devices)) { if (d.logging) d.logging = []; if (d.journal) d.journal = d.journal.slice(-20); }
@@ -224,6 +224,56 @@ export const FAULTS = [
     },
     fix(eng) { cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ipv6 access-list WAN6-IN', 'sequence 45 permit icmp any any nd-na', 'sequence 46 permit icmp any any nd-ns', 'end'); },
   },
+  // ---- ospf (Act II): the branch clinic over the private WAN. Faults change one router the way a real change would;
+  // waits let the dead timer / SPF delay play out (the far end only notices a silent change after its dead interval).
+  {
+    id: 'ospf-area-mismatch', title: 'OSPF area mismatch on the private WAN', objectives: ['2.1', '5.3', '5.5'],
+    inject(eng) {
+      cli(eng)('BRANCH-RTR', 'enable', 'configure terminal', 'router ospf 1', `no network ${BRANCH.wanNet} 0.0.0.3 area 0`, `network ${BRANCH.wanNet} 0.0.0.3 area 1`, 'end');
+      eng.advance(12);
+      return { change: 'BRANCH-RTR: OSPF area clean-up (contractor ticket CHG-3412: "branch is area 1")' };
+    },
+    fix(eng) {
+      cli(eng)('BRANCH-RTR', 'enable', 'configure terminal', 'router ospf 1', `no network ${BRANCH.wanNet} 0.0.0.3 area 1`, `network ${BRANCH.wanNet} 0.0.0.3 area 0`, 'end');
+      eng.advance(45);
+    },
+  },
+  {
+    id: 'ospf-passive-wan', title: 'Passive interface on the OSPF uplink', objectives: ['2.1', '5.3'],
+    inject(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'router ospf 1', 'passive-interface g0/3', 'end');
+      eng.advance(12);
+      return { change: 'EDGE-RTR: routing hardening, passive-interface on every interface (security review SR-77)' };
+    },
+    fix(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'router ospf 1', 'no passive-interface g0/3', 'end');
+      eng.advance(45);
+    },
+  },
+  {
+    id: 'ospf-stale-static', title: 'Static route overrides the OSPF route', objectives: ['2.1', '5.3', '5.5'],
+    inject(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', `ip route ${bnet(P(eng), 0)} 255.255.255.0 ${net(P(eng), 'clinic', 254)}`, 'end');
+      eng.advance(2);
+      return { change: 'EDGE-RTR: temporary route for the branch LTE backup test' };
+    },
+    fix(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', `no ip route ${bnet(P(eng), 0)} 255.255.255.0 ${net(P(eng), 'clinic', 254)}`, 'end');
+      eng.advance(3);
+    },
+  },
+  {
+    id: 'ospf-network-gap', title: 'Clinic VLAN missing from OSPF', objectives: ['2.1', '5.3'],
+    inject(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'router ospf 1', `no network ${net(P(eng), 'clinic', 0)} 0.0.0.255 area 0`, 'end');
+      eng.advance(12);
+      return { change: 'EDGE-RTR: OSPF network statements tidied (CHG-3420)' };
+    },
+    fix(eng) {
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'router ospf 1', `network ${net(P(eng), 'clinic', 0)} 0.0.0.255 area 0`, 'end');
+      eng.advance(20);
+    },
+  },
 ];
 
 const COMPLAINTS = {
@@ -236,6 +286,8 @@ const COMPLAINTS = {
   cams: 'Some camera feeds are black.',
   voice: 'Dispatch calls are choppy and drop words.',
   ipv6: 'Dispatch says IPv6-only sites will not load.', // ---- ipv6
+  branch: 'The branch clinic cannot open clinic records.',
+  'branch-share': 'Dispatch cannot open the branch clinic\'s file share.',
 };
 
 /**

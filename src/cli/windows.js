@@ -9,9 +9,15 @@ import { wallClock } from '../engine/engine.js';
 import { fmtIp6, parseIp6, parseIp6Zone, fmtAddr, isLinkLocal6 } from '../engine/ipv6.js';
 import { hostAddr6 } from '../engine/net6.js';
 import { winIpconfig6, winRoutePrint6, winNetshNeighbors, winNetshAddresses, winIfIndex } from './host6.js';
+import { sshConnect, parseOpenSsh, OPENSSH_USAGE } from './ssh.js'; // ---- ospf (Act II)
 
-export function winSession(dev) { return { dev: dev.id, os: 'windows', cwd: 'C:\\Users\\operator', history: [] }; }
-export function winPrompt(eng, sess) { return `${sess.cwd}>`; }
+/** opts.user: a session opened over SSH (Windows OpenSSH Server, default shell cmd.exe). */
+export function winSession(dev, opts = {}) {
+  if (opts.user) return { dev: dev.id, os: 'windows', cwd: `C:\\Users\\${opts.user}`, user: opts.user, history: [] };
+  return { dev: dev.id, os: 'windows', cwd: 'C:\\Users\\operator', history: [] };
+}
+// Over SSH, Windows OpenSSH's cmd.exe prompt carries user@HOST (e.g. "scott@IRONHEART C:\Users\scott>").
+export function winPrompt(eng, sess) { return sess.user ? `${sess.user}@${eng.s.devices[sess.dev].hostname} ${sess.cwd}>` : `${sess.cwd}>`; }
 
 const HELP = [
   'Supported commands on this training image:',
@@ -20,6 +26,7 @@ const HELP = [
   '  nslookup [-type=A|AAAA] <name> [server]   arp -a   route print [-4|-6]',
   '  curl [-4|-6] [-v] [-i] [-I] [-k] <url>   hostname   getmac   cls',
   '  netsh interface ipv6 show neighbors | addresses | route',
+  '  ssh user@host                   (OpenSSH client)',
 ];
 
 function adapterTitle(d) { return d.nic === 'wlan0' ? 'Wireless LAN adapter Wi-Fi:' : 'Ethernet adapter Ethernet:'; }
@@ -489,7 +496,17 @@ export function winExecute(eng, sess, raw) {
     case 'help': case '?': return { lines: HELP };
     case 'cls': case 'clear': return { lines: [], clear: true };
     case 'hostname': return { lines: [d.hostname] };
-    case 'whoami': return { lines: [`clinic\\operator`] };
+    case 'whoami': return { lines: [sess.user ? `${d.hostname.toLowerCase()}\\${sess.user}` : `clinic\\operator`] };
+    // ---- ospf (Act II): OpenSSH client (built into Windows 11); `exit` ends a session opened over SSH
+    case 'ssh': {
+      const a = parseOpenSsh(args, 'operator');
+      if (a.usage || a.error) return { lines: [...(a.error ? [a.error] : []), ...OPENSSH_USAGE] };
+      const r = sshConnect(eng, d, { user: a.user, host: a.host, port: a.port, client: 'openssh' });
+      return { lines: r.lines, ...(r.ok ? { sshOpen: r.open } : {}) };
+    }
+    case 'exit':
+      if (sess.user) return { lines: [], logout: true };
+      return { lines: [`'${parts[0]}' is not recognized as an internal or external command,`, 'operable program or batch file.'] };
     case 'getmac': return { lines: ['', 'Physical Address    Transport Name', '=================== ==========================================================', `${macWindows(d.ports[d.nic].mac)}   \\Device\\Tcpip_{4D36E972-E325-11CE-BFC1-08002BE10318}`] };
     case 'ipconfig': {
       // ---- ipv6: note when the player has looked at a global (SLAAC or static) IPv6 address
@@ -547,4 +564,4 @@ export function winExecute(eng, sess, raw) {
   }
 }
 
-export const WIN_COMMANDS = ['ipconfig', 'ipconfig /all', 'ipconfig /renew', 'ipconfig /release', 'ipconfig /flushdns', 'ipconfig /displaydns', 'ping', 'tracert', 'pathping', 'nslookup', 'curl', 'arp -a', 'route print', 'hostname', 'getmac', 'cls', 'help', 'netsh interface ipv6 show neighbors', 'netsh interface ipv6 show addresses', 'route print -6'];
+export const WIN_COMMANDS = ['ipconfig', 'ipconfig /all', 'ipconfig /renew', 'ipconfig /release', 'ipconfig /flushdns', 'ipconfig /displaydns', 'ping', 'tracert', 'pathping', 'nslookup', 'curl', 'arp -a', 'route print', 'hostname', 'getmac', 'cls', 'help', 'netsh interface ipv6 show neighbors', 'netsh interface ipv6 show addresses', 'route print -6', 'ssh'];

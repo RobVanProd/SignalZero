@@ -20,6 +20,8 @@ export const ARG_TYPES = {
   IP6: { help: 'X:X:X:X::X  IPv6 address', parse: t => (t.includes(':') ? parseIp6(t) : null) },
   PFX6: { help: 'X:X:X:X::X/<0-128>  IPv6 prefix', parse: t => (t.includes(':') ? parseCidr6(t) : null) },
   NH6: { help: 'X:X:X:X::X  IPv6 address of next-hop | Interface', parse: t => (t.includes(':') ? parseIp6(t) : canonIf(t)) },
+  // ---- ospf (Act II): OSPF area ID, decimal or dotted; the text is kept because IOS shows it as entered
+  AREA: { help: '<0-4294967295>  OSPF area ID as a decimal value | A.B.C.D  OSPF area ID in IP address format', parse: t => (/^\d+$/.test(t) && Number(t) <= 4294967295 ? { area: Number(t), text: String(Number(t)) } : parseIp(t) !== null ? { area: parseIp(t), text: t } : null) },
 };
 
 export function tokenize(line) {

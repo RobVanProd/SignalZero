@@ -6,6 +6,8 @@ import { probe, sendPacket } from './trace.js';
 import { dhcpClient, applyDhcpResult, fleetDhcp, dhcpHostTick, httpRequest, namedLoad, dhcpdStart } from './services.js';
 import { longIf, macCisco } from './model.js';
 import { routeTable6, v6AfterChange, v6Periodic, RA_INTERVAL } from './net6.js';
+// ---- ospf (Act II)
+import { ospfTick, ospfReconcile, ospfRib } from './ospf.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -101,6 +103,9 @@ export class Engine {
     if (!c.has(key)) c.set(key, flood(this, dev, port, tag, opts));
     return c.get(key);
   }
+
+  /** ---- ospf (Act II): OSPF routes offered to routeTable() (AD 110). */
+  ospfRib(d) { return ospfRib(this, d); }
 
   routes(devId) {
     const c = (this.cache.rt ||= new Map());
@@ -239,6 +244,8 @@ export class Engine {
       }
     }
     this.checkStormOnset();
+    // ---- ospf (Act II): interfaces that went down or changed drop their neighbours at once; LSAs re-originate.
+    ospfReconcile(this, silent);
     // Media connect: DHCP clients start (DORA) or re-confirm a remembered lease (INIT-REBOOT).
     for (const end of ups) {
       const d = s.devices[end.dev];
@@ -262,6 +269,7 @@ export class Engine {
     this.cache = {};
     for (const l of Object.values(this.s.links)) this.s.linkMemo[l.id] = this.linkStatus(l.id).up;
     this.pvidLogs(true);
+    ospfReconcile(this, true); // ---- ospf (Act II)
     for (const d of Object.values(this.s.devices)) {
       if (d.kind !== 'host') continue;
       if (d.services?.named?.active) namedLoad(this, d);
@@ -284,6 +292,8 @@ export class Engine {
     for (let i = 0; i < steps; i++) {
       s.t += h;
       if (tickStp(this)) { this.cache = {}; this.rev++; this.checkStormOnset(); this.evaluateFlows(); }
+      // ---- ospf (Act II): hellos, dead timers, adjacency progress, flooding and SPF on the simulated clock
+      if (ospfTick(this)) { this.cache = {}; this.rev++; this.evaluateFlows(); }
       this.tickCounters(h);
       for (const d of Object.values(s.devices)) {
         if (d.kind !== 'host' || !d.ipcfg.dhcp || d.released || d.managedDhcp === false || d.powered === false) continue;

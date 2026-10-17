@@ -12,6 +12,7 @@ import { fmtIp6, parseIp6, fmtAddr, isLinkLocal6 } from '../engine/ipv6.js';
 import { hostAddr6 } from '../engine/net6.js';
 import { lookupHost, resolveName6 } from '../engine/services.js';
 import { linuxInet6Lines, linuxRoute6, linuxNeigh6, LO_INET6 } from './host6.js';
+import { sshConnect, parseOpenSsh, OPENSSH_USAGE } from './ssh.js'; // ---- ospf (Act II)
 
 const UNITS = {
   'isc-dhcp-server': { svc: 'isc-dhcp-server', desc: 'ISC DHCP IPv4 server', docs: 'man:dhcpd(8)', proc: 'dhcpd' },
@@ -23,10 +24,16 @@ const UNITS = {
   'nvr-ingest': { svc: 'rtsp', desc: 'NVR RTSP ingest service', docs: 'man:nvr(8)', proc: 'nvr' },
 };
 
-export function linuxSession(dev) { return { dev: dev.id, os: 'linux', cwd: '/root', history: [] }; }
+/** opts.user: a session opened over SSH as that user (default: the root console). */
+export function linuxSession(dev, opts = {}) {
+  if (opts.user && opts.user !== 'root') return { dev: dev.id, os: 'linux', cwd: `/home/${opts.user}`, user: opts.user, history: [] };
+  return { dev: dev.id, os: 'linux', cwd: '/root', history: [] };
+}
+const homeOf = sess => (sess.user ? `/home/${sess.user}` : '/root');
 export function linuxPrompt(eng, sess) {
   const d = eng.s.devices[sess.dev];
-  return `root@${d.hostname.toLowerCase()}:${sess.cwd === '/root' ? '~' : sess.cwd}#`;
+  const user = sess.user || 'root';
+  return `${user}@${d.hostname.toLowerCase()}:${sess.cwd === homeOf(sess) ? '~' : sess.cwd}${user === 'root' ? '#' : '$'}`;
 }
 
 const p2 = n => String(n).padStart(2, '0');
@@ -126,7 +133,7 @@ function listFiles(eng, d) {
 function resolvePath(sess, p) {
   if (!p) return sess.cwd;
   if (p.startsWith('/')) return p.replace(/\/+$/, '') || '/';
-  if (p === '~') return '/root';
+  if (p === '~') return sess.user ? `/home/${sess.user}` : '/root';
   const parts = (sess.cwd === '/' ? '' : sess.cwd).split('/').filter(Boolean);
   for (const x of p.split('/')) { if (x === '..') parts.pop(); else if (x && x !== '.') parts.push(x); }
   return '/' + parts.join('/');
@@ -549,19 +556,26 @@ export function linuxExecute(eng, sess, raw) {
   const args = parts.slice(1);
   const out = (lines, extra = {}) => ({ lines: pipes.length ? applyPipes(lines, pipes) : lines, ...extra });
   switch (cmd) {
-    case 'help': return out(['Supported commands on this training image:', '  ip a | ip r | ip link | ip -6 a | ip -6 r | ip -6 neigh   ping [-4|-6] [-c n] host   traceroute [-4|-6] host', '  dig [@server] name [A|AAAA|...] [+short]             nslookup name [server]', '  curl [-4|-6] [-v] [-i] [-k] url   ss -tulpn           hostname   date   uptime', '  systemctl status|start|stop|restart|reload <unit>    journalctl [-u unit] [-n N]', '  cat <file>   ls [dir]   nano <file>   cd <dir>   pwd', '  dhcpd -t -cf /etc/dhcp/dhcpd.conf     dhcp-lease-list     netplan apply', '  named-checkzone <zone> <file>         named-checkconf      rndc reload', '  Pipes: | grep [-i] pattern  | tail -n N  | head -n N']);
+    case 'help': return out(['Supported commands on this training image:', '  ip a | ip r | ip link | ip -6 a | ip -6 r | ip -6 neigh   ping [-4|-6] [-c n] host   traceroute [-4|-6] host', '  dig [@server] name [A|AAAA|...] [+short]             nslookup name [server]', '  curl [-4|-6] [-v] [-i] [-k] url   ss -tulpn           hostname   date   uptime', '  systemctl status|start|stop|restart|reload <unit>    journalctl [-u unit] [-n N]', '  cat <file>   ls [dir]   nano <file>   cd <dir>   pwd      ssh user@host', '  dhcpd -t -cf /etc/dhcp/dhcpd.conf     dhcp-lease-list     netplan apply', '  named-checkzone <zone> <file>         named-checkconf      rndc reload', '  Pipes: | grep [-i] pattern  | tail -n N  | head -n N']);
     case 'clear': return { lines: [], clear: true };
     case 'hostname': return out([d.hostname.toLowerCase()]);
-    case 'whoami': return out(['root']);
+    case 'whoami': return out([sess.user || 'root']);
+    // ---- ospf (Act II): OpenSSH client
+    case 'ssh': {
+      const a = parseOpenSsh(args, sess.user || 'root');
+      if (a.usage || a.error) return out([...(a.error ? [`ssh: ${a.error}`] : []), ...OPENSSH_USAGE]);
+      const r = sshConnect(eng, d, { user: a.user, host: a.host, port: a.port, client: 'openssh' });
+      return { lines: r.lines, ...(r.ok ? { sshOpen: r.open } : {}) };
+    }
     case 'pwd': return out([sess.cwd]);
     case 'date': { const w = wallClock(eng.s.t); return out([`${w.dow.slice(0, 3)} ${w.mon} ${p2(w.day)} ${p2(w.hh)}:${p2(w.mm)}:${p2(w.ss)} AM UTC ${w.year}`]); }
     case 'uptime': return out([` ${p2(wallClock(eng.s.t).hh)}:${p2(wallClock(eng.s.t).mm)}:${p2(wallClock(eng.s.t).ss)} up 211 days,  3:12,  1 user,  load average: 0.04, 0.03, 0.00`]);
-    case 'cd': { const p = resolvePath(sess, args[0] || '/root'); sess.cwd = p; return out([]); }
+    case 'cd': { const p = resolvePath(sess, args[0] || homeOf(sess)); sess.cwd = p; return out([]); }
     case 'ls': {
       const dir = resolvePath(sess, args.find(a => !a.startsWith('-')));
       const names = new Set();
       for (const f of listFiles(eng, d)) if (f.startsWith(dir === '/' ? '/' : dir + '/')) names.add(f.slice(dir === '/' ? 1 : dir.length + 1).split('/')[0]);
-      if (dir === '/root') return out([]);
+      if (dir === homeOf(sess)) return out([]);
       return out(names.size ? [[...names].sort().join('  ')] : [`ls: cannot access '${args[0] || dir}': No such file or directory`]);
     }
     case 'cat': case 'less': case 'more': {
@@ -704,4 +718,4 @@ export function linuxSaveFile(eng, devId, path, text) {
   eng.event({ type: 'edit', host: devId, path });
 }
 
-export const LINUX_COMMANDS = ['systemctl status', 'systemctl start', 'systemctl restart', 'journalctl -u', 'cat', 'nano', 'dhcpd -t', 'named-checkzone', 'rndc reload', 'dig', 'ip a', 'ip r', 'ss -tulpn', 'ping', 'curl', 'traceroute'];
+export const LINUX_COMMANDS = ['systemctl status', 'systemctl start', 'systemctl restart', 'journalctl -u', 'cat', 'nano', 'dhcpd -t', 'named-checkzone', 'rndc reload', 'dig', 'ip a', 'ip r', 'ss -tulpn', 'ping', 'curl', 'traceroute', 'ssh'];

@@ -44,8 +44,11 @@ export function ownsIp(eng, d, ip) {
 }
 
 /**
- * Router table. Returns [{ type:'C'|'L'|'S', net, len, iface, nh, ad }] for installed routes only,
- * plus eng.lastRouteNotes explaining why configured statics were not installed.
+ * Router table. Returns [{ type:'C'|'L'|'S'|'O', net, len, iface, nh, ad }] for installed routes only,
+ * plus notInstalled explaining why configured statics were not installed.
+ * Like the IOS RIB, each prefix keeps only the routes with the lowest administrative distance (connected 0,
+ * static 1 by default, OSPF 110): a floating static (AD 250) waits behind an OSPF route, and an AD-1 static hides
+ * the OSPF route for the same prefix. Forwarding then uses the longest matching prefix (lookup()).
  */
 export function routeTable(eng, d) {
   const table = [];
@@ -54,39 +57,57 @@ export function routeTable(eng, d) {
     table.push({ type: 'C', net: networkOf(i.addr, i.len), len: i.len, iface: i.name, nh: null, ad: 0 });
     table.push({ type: 'L', net: i.addr, len: 32, iface: i.name, nh: null, ad: 0 });
   }
+  // ---- ospf: routes from the last SPF run (src/engine/ospf.js), offered with AD 110
+  const ospf = d.kind === 'router' && eng.ospfRib ? eng.ospfRib(d) : [];
   const notInstalled = [];
   const resolve = (nh, depth) => {
     const direct = ifs.find(i => inSubnet(nh, i.addr, i.len));
     if (direct) return direct.name;
     if (depth <= 0) return null;
-    // recursive: via another static route
+    // recursive: via another static route, or a dynamic route covering the next hop (longest match)
     let best = null;
     for (const r of d.routes) {
       if (r.nh === null || !inSubnet(nh, r.net, r.len)) continue;
       if (best && best.len >= r.len) continue;
       best = r;
     }
+    let dyn = null;
+    for (const r of ospf) if (inSubnet(nh, r.net, r.len) && (!dyn || r.len > dyn.len)) dyn = r;
+    if (dyn && (!best || dyn.len > best.len)) return dyn.iface;
     return best ? resolve(best.nh, depth - 1) : null;
   };
   for (const r of d.routes) {
     if (r.iface) {
       const i = ifs.find(x => x.name === r.iface);
-      if (i) table.push({ type: 'S', net: r.net, len: r.len, iface: r.iface, nh: r.nh ?? null, ad: r.ad ?? 1, exitIf: true });
+      if (i) table.push({ type: 'S', net: r.net, len: r.len, iface: r.iface, nh: r.nh ?? null, ad: r.ad ?? 1, exitIf: true, cfg: r });
       else notInstalled.push({ route: r, why: `exit interface ${r.iface} is down` });
       continue;
     }
     const iface = resolve(r.nh, 3);
-    if (iface) table.push({ type: 'S', net: r.net, len: r.len, iface, nh: r.nh, ad: r.ad ?? 1 });
+    if (iface) table.push({ type: 'S', net: r.net, len: r.len, iface, nh: r.nh, ad: r.ad ?? 1, cfg: r });
     else notInstalled.push({ route: r, why: 'next hop is not reachable through any connected network' });
   }
-  return { table, notInstalled };
+  table.push(...ospf);
+  // one administrative distance per prefix (the best); equal-AD statics stay side by side
+  const bestAd = new Map();
+  for (const r of table) {
+    const k = `${r.net}/${r.len}`;
+    if (!bestAd.has(k) || r.ad < bestAd.get(k)) bestAd.set(k, r.ad);
+  }
+  const installed = [];
+  for (const r of table) {
+    if (r.ad === bestAd.get(`${r.net}/${r.len}`)) { const { cfg, ...rest } = r; installed.push(rest); continue; }
+    if (r.type === 'S') notInstalled.push({ route: r.cfg, why: `a route with a lower administrative distance (${bestAd.get(`${r.net}/${r.len}`)}) is installed for this prefix` });
+  }
+  return { table: installed, notInstalled };
 }
 
+/** Longest matching prefix, then lowest administrative distance, then lowest metric. */
 export function lookup(table, ip) {
   let best = null;
   for (const r of table) {
     if (!inSubnet(ip, r.net, r.len)) continue;
-    if (!best || r.len > best.len || (r.len === best.len && r.ad < best.ad)) best = r;
+    if (!best || r.len > best.len || (r.len === best.len && (r.ad < best.ad || (r.ad === best.ad && (r.metric ?? 0) < (best.metric ?? 0))))) best = r;
   }
   return best;
 }
@@ -103,7 +124,7 @@ export function hostNextHop(a, dst) {
 
 // ---------------------------------------------------------------- ACLs
 
-const PROTO_NUM = { icmp: 1, tcp: 6, udp: 17 };
+const PROTO_NUM = { icmp: 1, tcp: 6, udp: 17, ospf: 89 };
 
 function portMatch(spec, port) {
   if (!spec) return true;

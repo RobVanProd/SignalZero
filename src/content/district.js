@@ -48,6 +48,14 @@ function addIpv6Internet(p, D) {
   // The backup vendor's new endpoint: IPv6 only (nginx "listen [::]:443 ipv6only=on" for this server block).
   D.BACKUP.services.nginx.sites.push({ ...nginxSite([BACKUP6_NAME], { '/health': { status: 200, body: '{"backup":"ready","uploads":"accepted","transport":"ipv6"}' }, '/': { status: 200, body: '{"service":"backup-api","version":"4.0","transport":"ipv6-only"}' } }), family: 6 });
 }
+// ---- ospf (Act II): branch clinic addressing (EXPANSION_PLAN.md). The branch site follows the clinic site (42 -> 43),
+// so randomised challenge plans never collide with the clinic's 10.<site>.0.0/16.
+export const BRANCH = { wanNet: '172.16.42.0', edgeWan: '172.16.42.1', branchWan: '172.16.42.2', inet: '198.51.100.10', ispInet: '198.51.100.9' };
+export function branchSite(p) { return p.branchSite ?? p.site + 1; }
+/** Address on the branch LAN (10.43.10.0/24 in the campaign). */
+export function bnet(p, host) { return `10.${branchSite(p)}.10.${host}`; }
+/** OSPF router IDs used by the contractor's design. */
+export function routerIds(p) { return { edge: `10.${p.site}.255.1`, branch: `10.${branchSite(p)}.255.1` }; }
 
 export function dhcpdConf(p, o = {}) {
   const v = p.vlans;
@@ -302,6 +310,53 @@ export function buildDistrict(params = DEFAULT_PARAMS) {
   lk('swb-cams', ['DIST-SW-B', 'Gi0/4'], ['CAMERAS', 'eth0'], { lengthM: 60 });
   lk('swb-door', ['DIST-SW-B', 'Gi0/5'], ['DOOR-CTRL', 'eth0'], { lengthM: 40 });
   lk('swb-phone', ['DIST-SW-B', 'Gi0/6'], ['VOIP-PHONE', 'eth0'], { lengthM: 12 });
+
+  // ---- ospf (Act II): branch clinic (site 43). Private WAN EDGE-RTR Gi0/3 <-> CARRIER (metro-Ethernet EVC, offsite,
+  // unmanaged) <-> BRANCH-RTR Gi0/0, and the branch's own internet circuit on ISP-PE. The branch exists and browses
+  // the internet through its own PAT from the start; OSPF over the private WAN is configured in M12.
+  // Explicit device indexes (60+) keep the branch MACs stable whatever other topic builds add before this block.
+  {
+    const bp = BRANCH;
+    // New WAN module port on EDGE-RTR, cabled to the carrier demarc. Unconfigured IOS interface: shutdown, proxy ARP on.
+    // Gi0/2 stays the spare behind patch-panel port P02.
+    addPort(rtr, 'Gi0/3', { adminUp: false, proxyArp: true });
+    addPort(isp, 'Gi0/2', { ip: { addr: ip(bp.ispInet), len: 30 }, description: 'Customer: branch clinic DC-51207' });
+    const carrier = add(device('CARRIER', 'bridge', 'none', { index: 60, managed: false, model: 'Metro-Ethernet EVC (provider network)', map: { x: 180, y: 40 }, role: 'Carrier private WAN (EVC MEF-42-0043)', zone: 'offsite' }));
+    addPort(carrier, 'uni-a');
+    addPort(carrier, 'uni-b');
+    const br = add(device('BRANCH-RTR', 'router', 'ios', { index: 61, model: 'ISR4321', map: { x: 70, y: 520 }, role: 'Branch clinic router (site 43)', zone: 'branch' }));
+    addPort(br, 'Gi0/0', { ip: { addr: ip(bp.branchWan), len: 30 }, description: 'PRIVATE WAN to EDGE-RTR (EVC MEF-42-0043)' });
+    addPort(br, 'Gi0/1', { ip: { addr: ip(bp.inet), len: 30 }, nat: 'outside', description: 'INTERNET (ISP circuit DC-51207)' });
+    addPort(br, 'Gi0/2', { ip: { addr: ip(bnet(p, 1)), len: 24 }, nat: 'inside', description: 'BRANCH LAN' });
+    addPort(br, 'Con0', { kind: 'console' });
+    br.acls['NAT-INSIDE'] = { kind: 'standard', entries: [{ seq: 10, action: 'permit', src: { addr: ip(bnet(p, 0)), wild: ip('0.0.0.255') } }] };
+    // Management: SSH only, from the clinic NOC VLAN and across the private WAN /30 (not from the internet).
+    br.acls['VTY-MGMT'] = { kind: 'standard', entries: [
+      { seq: 10, action: 'permit', src: { addr: ip(net(p, 'clinic', 0)), wild: ip('0.0.0.255') } },
+      { seq: 20, action: 'permit', src: { addr: ip(bp.wanNet), wild: ip('0.0.0.3') } },
+    ] };
+    br.vty = { acl: 'VTY-MGMT', transport: ['ssh'] };
+    br.nat.push({ acl: 'NAT-INSIDE', iface: 'Gi0/1', overload: true });
+    br.routes.push({ net: 0, len: 0, nh: ip(bp.ispInet) });
+    const bsw = add(device('BRANCH-SW', 'bridge', 'none', { index: 62, managed: false, model: 'Unmanaged 8-port gigabit switch', map: { x: 70, y: 580 }, role: 'Branch LAN switch (unmanaged)', zone: 'branch' }));
+    for (let i = 1; i <= 8; i++) addPort(bsw, `p${i}`);
+    const bpc = add(device('BRANCH-PC', 'host', 'windows', {
+      index: 63, map: { x: 160, y: 600 }, role: 'Branch clinic reception PC (file share, remote support SSH)', zone: 'branch',
+      // DNS: the clinic's server first, a public resolver second (internet names keep working when the WAN is down)
+      ipcfg: { dhcp: false, static: { addr: ip(bnet(p, 50)), len: 24, gw: ip(bnet(p, 1)), dns: [ip(net(p, 'clinic', 10)), ip('203.0.113.53')] } },
+      services: {
+        smb: { kind: 'smb', unit: 'LanmanServer', active: true, listen: [{ proto: 'tcp', port: 445 }] },
+        // Windows OpenSSH Server (optional feature) enabled by branch IT for remote support.
+        sshd: { kind: 'ssh', unit: 'sshd', active: true, listen: [{ proto: 'tcp', port: 22 }] },
+      },
+    }));
+    addPort(bpc, 'eth0');
+    lk('carrier-a', ['EDGE-RTR', 'Gi0/3'], ['CARRIER', 'uni-a'], { latencyMs: 1.4, lengthM: 15, label: 'Carrier handoff (demarc) · EVC MEF-42-0043' });
+    lk('carrier-b', ['CARRIER', 'uni-b'], ['BRANCH-RTR', 'Gi0/0'], { latencyMs: 2.6, lengthM: 10, label: 'Carrier tail to the branch' });
+    lk('branch-inet', ['BRANCH-RTR', 'Gi0/1'], ['ISP-PE', 'Gi0/2'], { latencyMs: 4.4, lengthM: 30, label: 'Branch internet circuit DC-51207' });
+    lk('branch-lan', ['BRANCH-RTR', 'Gi0/2'], ['BRANCH-SW', 'p1'], { lengthM: 3 });
+    lk('branch-pc', ['BRANCH-SW', 'p2'], ['BRANCH-PC', 'eth0'], { lengthM: 12 });
+  }
 
   const state = {
     version: 3,

@@ -7,11 +7,13 @@ import { longIf, canonIf, parentIf, portDefaults } from '../engine/model.js';
 import { initialTtl } from '../engine/trace.js';
 import { l3Ifaces } from '../engine/routing.js';
 import { addIpv6Grammar, runIpv6, answerPending } from './ios-ipv6.js'; // ---- ipv6
+import { addOspfGrammar, ospfHandle, confirmAnswer } from './ios-ospf.js'; // ---- ospf (Act II)
 
 const PORT_NUM = { www: 80, http: 80, domain: 53, bootps: 67, bootpc: 68, telnet: 23, smtp: 25, ftp: 21, tftp: 69, ntp: 123, snmp: 161, syslog: 514, pop3: 110, bgp: 179, isakmp: 500 };
 
 function promptFor(dev, sess) {
   const h = dev.hostname;
+  if (sess.confirm) return sess.confirm.prompt; // ---- ospf (Act II): pending "[no]:" question
   switch (sess.mode) {
     case 'user': return `${h}>`;
     case 'exec': return `${h}#`;
@@ -21,6 +23,8 @@ function promptFor(dev, sess) {
     case 'acl-std': return `${h}(config-std-nacl)#`;
     case 'vlan': return `${h}(config-vlan)#`;
     case 'acl6': return `${h}(config-ipv6-acl)#`; // ---- ipv6
+    case 'router-ospf': return `${h}(config-router)#`;
+    case 'line': return `${h}(config-line)#`;
     default: return `${h}#`;
   }
 }
@@ -83,7 +87,7 @@ export function parseAce(kind, toks) {
     return { ace: { action, src: a.spec, ...(log ? { log } : {}) } };
   }
   const proto = toks[1]?.toLowerCase();
-  if (!['ip', 'tcp', 'udp', 'icmp'].includes(proto)) return { errTok: 1 };
+  if (!['ip', 'tcp', 'udp', 'icmp', 'ospf'].includes(proto)) return { errTok: 1 };
   const s = parseAddrSpec(toks, 2);
   if (s.err !== undefined) return { errTok: s.err };
   let i = s.next;
@@ -214,7 +218,6 @@ function buildGrammar(kind) {
     g.add(ex, 'ping <IP> source <NH:src>', 'ping');
     unimpl(ex, 'show ip nat statistics', 'show ip nat translations');
     unimpl('exec', 'clear ip nat translation *', 'show ip nat translations');
-    unimpl(ex, 'show ip protocols', 'show ip route (this network uses static routes only)');
     unimpl(ex, 'show standby', 'show ip interface brief (no HSRP is configured here)');
     unimpl(ex, 'show standby brief', 'show ip interface brief (no HSRP is configured here)');
     g.add(ex, 'show ip arp', 'sh-arp');
@@ -346,6 +349,7 @@ function buildGrammar(kind) {
     g.add(ifm, 'ip unreachables', 'unreach');
     g.add(ifm, 'no ip unreachables', 'no-unreach');
     addIpv6Grammar(g); // ---- ipv6
+    addOspfGrammar(g); // ---- ospf (Act II): router ospf, ip ospf ..., show ip ospf ..., line vty, ssh
   }
   return g;
 }
@@ -386,6 +390,7 @@ function normaliseIfSpacing(line) {
 export function iosExecute(eng, sess, raw) {
   const dev = eng.s.devices[sess.dev];
   const g = GRAMMARS[dev.kind === 'router' ? 'router' : 'switch'];
+  if (sess.confirm) { const r = confirmAnswer(eng, dev, sess, raw); return { ...r, prompt: promptFor(dev, sess) }; } // ---- ospf (Act II)
   const prompt = promptFor(dev, sess);
   if (sess.pending) return { ...answerPending(eng, dev, sess, raw), prompt }; // ---- ipv6: "Output Interface:" prompt
   let line = normaliseIfSpacing(raw.replace(/\t/g, ' '));
@@ -500,7 +505,7 @@ function run(handler, ctx) {
     case 'sh-cpu': L.push(...S.showCpu(eng, dev)); return done();
     case 'write': L.push('Building configuration...', '[OK]'); dev.startup = S.runningConfig(eng, dev).slice(2); dev.savedSeq = eng.s.changeSeq; eng.event({ type: 'save', host: dev.id }); return done();
     case 'sh-route': {
-      const only = /\bstatic\s*$/i.test(ctx.line) ? ['S'] : /\bconnected\s*$/i.test(ctx.line) ? ['C', 'L'] : null;
+      const only = /\bstatic\s*$/i.test(ctx.line) ? ['S'] : /\bconnected\s*$/i.test(ctx.line) ? ['C', 'L'] : /\bospf\s*$/i.test(ctx.line) ? ['O'] : null;
       const r = S.showIpRoute(eng, dev, only);
       L.push(...r.lines);
       eng.event({ type: 'show', host: dev.id, what: 'route' });
@@ -542,7 +547,7 @@ function run(handler, ctx) {
         else marks += '.';
       }
       L.push(marks, `Success rate is ${ok * 20} percent (${ok}/5)${ok ? `, round-trip min/avg/max = ${Math.min(...rtts)}/${Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length)}/${Math.max(...rtts)} ms` : ''}`);
-      eng.event({ type: 'ping', host: dev.id, ip: args.ip, ok: ok > 0 });
+      eng.event({ type: 'ping', host: dev.id, ip: args.ip, ok: ok > 0, ...(srcIp !== undefined ? { src: srcIp } : {}) });
       return done();
     }
     case 'trace': {
@@ -659,12 +664,13 @@ function run(handler, ctx) {
     case 'route-ifnh': {
       if (networkOf(args.net, args.mask) !== args.net) { L.push('%Inconsistent address and mask'); return done(); }
       const nh = handler === 'route-ifnh' ? args.nh : args.nh;
+      if (args.ad !== undefined && (args.ad < 1 || args.ad > 255)) return { lines: caretLines(ctx.prompt, ctx.line, ctx.line.lastIndexOf(' ') + 1) }; // distance <1-255>
       const r = { net: args.net, len: args.mask, nh: typeof nh === 'number' ? nh : null, iface: typeof nh === 'string' ? nh : null, ad: args.ad ?? 1 };
       if (handler === 'route-ifnh') { r.iface = args.if; r.nh = args.nh; }
       if (r.iface && !dev.ports[parentIf(r.iface)]) return { lines: caretLines(ctx.prompt, ctx.line, ctx.line.lastIndexOf(' ') + 1) };
       if (r.nh !== null && l3Owns(dev, r.nh)) { L.push(`%Invalid next hop address (it's this router)`); return done(); }
       const exists = dev.routes.find(x => x.net === r.net && x.len === r.len && x.nh === r.nh && x.iface === r.iface);
-      if (exists) { exists.ad = r.ad; return done(); }
+      if (exists) { if (exists.ad !== r.ad) { exists.ad = r.ad; mut(ctx); } return done(); }
       dev.routes.push(r);
       mut(ctx);
       return done();
@@ -864,9 +870,11 @@ function run(handler, ctx) {
       // ---- ipv6
       const r6 = runIpv6(handler, ctx, { mut, ifTarget: c => (c.sess.ctx.sub ? c.dev.subifs[c.sess.ctx.sub] : c.sess.ctx.iface ? c.dev.ports[c.sess.ctx.iface] : null) });
       if (r6) return r6;
-    }
+      const r = ospfHandle(handler, ctx); // ---- ospf (Act II)
+      if (r) return r;
       L.push(`% Command not implemented in this training image: ${ctx.line}`);
       return done();
+    }
   }
 }
 
