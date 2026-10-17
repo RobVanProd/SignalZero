@@ -7,6 +7,10 @@ import { httpRequest, dhcpDryRun, dhcpClient, applyDhcpResult } from '../engine/
 import { device, addPort, link } from '../engine/model.js';
 import { net, patchConnect, dhcpdConf, zoneFile } from './district.js';
 import { createSession, execute, saveFile } from '../cli/index.js';
+// ---- ipv6 (Act II)
+import { parseIp6, inPrefix6 } from '../engine/ipv6.js';
+import { hostAddr6 } from '../engine/net6.js';
+import { net6, WAN6, INET6, BACKUP6_NAME } from './district.js';
 
 const A = (eng, role, host) => ip(net(eng.s.params, role, host));
 const V = (eng, role) => eng.s.params.vlans[role];
@@ -47,7 +51,11 @@ export function leaseIn(eng, hostId, role) {
 export function flowDefs(eng) {
   return {
     clinic: { id: 'clinic', label: 'Dispatch → clinic records', from: 'DISPATCH-01', kind: 'http', url: 'https://clinic.ops.example/health', district: 'clinic' },
-    backup: { id: 'backup', label: 'Records → offsite backup', from: 'CORE-SRV', kind: 'http', url: 'https://backup.example.net/health', district: 'data' },
+    // ---- ipv6 (Act II): from M11 on, the backup job uploads to the vendor's IPv6-only endpoint
+    backup: eng.s.backup6
+      ? { id: 'backup', label: 'Records → offsite backup (IPv6)', from: 'CORE-SRV', kind: 'http', url: `https://${BACKUP6_NAME}/health`, district: 'data' }
+      : { id: 'backup', label: 'Records → offsite backup', from: 'CORE-SRV', kind: 'http', url: 'https://backup.example.net/health', district: 'data' },
+    ipv6: { id: 'ipv6', label: 'Dispatch → internet over IPv6', from: 'DISPATCH-01', kind: 'probe', dst: parseIp6(INET6.PORTAL), proto: 'tcp', port: 443, district: 'data' },
     guest: { id: 'guest', label: 'Guest Wi-Fi → internet', from: 'GUEST-KIOSK', kind: 'http', url: 'https://portal.example.net/', district: 'public' },
     isolation: { id: 'isolation', label: 'Guest ✕ clinic systems', from: 'GUEST-KIOSK', kind: 'probe', dst: A(eng, 'clinic', 20), proto: 'tcp', port: 443, expect: 'blocked', district: 'security' },
     nurse: { id: 'nurse', label: 'Ward B → clinic records', from: 'NURSE-STATION', kind: 'http', url: 'https://clinic.ops.example/health', district: 'ward' },
@@ -529,6 +537,76 @@ export const MISSIONS = [
       const run = cli(eng);
       run('ACCESS-SW', 'enable', 'configure terminal', 'ip dhcp snooping', `ip dhcp snooping vlan ${V(eng, 'guest')}`, 'no ip dhcp snooping information option', 'interface g0/1', 'ip dhcp snooping trust', 'end');
       run('GUEST-KIOSK', 'ipconfig /release', 'ipconfig /renew');
+    },
+  },
+
+  // ------------------------------------------------------------------------------------------ ACT II
+  // ---- ipv6 (Act II)
+  {
+    id: 'M11', act: 2, code: 'IPv6 · DUAL STACK', title: 'THE OTHER STACK',
+    objectives: ['1.7', '1.8', '3.4', '5.3', '5.5'],
+    station: 'router',
+    brief: 'The backup vendor froze its IPv4 endpoint at midnight. Uploads are accepted only at backup6.example.net, which has an IPv6 address and nothing else. The ISP delegated 2001:db8:42::/48 to the clinic months ago and says its side of the WAN is ready, but nobody ever turned IPv6 on here.',
+    task: 'Bring up dual stack on EDGE-RTR: IPv6 on the WAN link, a /64 on the clinic VLAN so its hosts can configure themselves, and an IPv6 default route to the ISP. Get the backup job working over IPv6 without breaking anything on IPv4, and prove it from an inside host.',
+    radioStart: 'Vendor ticket: "uploads to backup.example.net are rejected, use backup6.example.net". The ISP\'s sheet says: WAN 2001:db8:ffff:1::/64, their router ::1 (link-local FE80::1), ours ::2. Delegated prefix 2001:db8:42::/48, routed to our ::2.',
+    radioWin: 'Backups are uploading over IPv6 and IPv4 never blinked. That is the first night of dual stack at the clinic.',
+    setup(eng) {
+      const s = eng.s;
+      s.backup6 = true;
+      // The vendor keeps the IPv4 health endpoint (read-only) and takes uploads only on the IPv6 endpoint.
+      const v4site = s.devices.BACKUP.services.nginx.sites.find(x => x.names.includes('backup.example.net'));
+      if (v4site) v4site.routes['/health'] = { status: 200, body: '{"backup":"read-only","uploads":"rejected","notice":"IPv4 endpoint retired, upload to backup6.example.net"}' };
+      const f = s.flows.find(x => x.id === 'backup');
+      if (f) Object.assign(f, flowDefs(eng).backup);
+      enableFlows(eng, ['ipv6']);
+      eng.mutated('backup vendor: uploads moved to backup6.example.net (IPv6 only)', 'vendor');
+    },
+    goals: [
+      { label: 'EDGE-RTR routes IPv6 and has an IPv6 default route installed', check: eng => !!eng.s.devices['EDGE-RTR'].ipv6Routing && eng.routes6('EDGE-RTR').table.some(r => r.len === 0) },
+      { label: 'DISPATCH-01 built a global address in the clinic /64 (SLAAC) and has an IPv6 default router', check: eng => {
+        const a = hostAddr6(eng, eng.s.devices['DISPATCH-01']);
+        const pfx = parseIp6(net6(eng.s.params, 'clinic', ''));
+        return a.routers.length > 0 && a.addrs.some(x => x.kind === 'slaac' && inPrefix6(x.addr, pfx, 64));
+      } },
+      { label: 'The backup job on CORE-SRV reaches https://backup6.example.net (IPv6 only)', check: eng => httpOk(eng, 'CORE-SRV', `https://${BACKUP6_NAME}/health`) },
+      { label: 'DISPATCH-01 reaches the internet over IPv6', check: eng => reaches(eng, 'DISPATCH-01', parseIp6(INET6.PORTAL), 'tcp', 443) },
+    ],
+    constraints: [
+      { label: 'IPv4 still works: dispatch reaches clinic records', check: eng => httpOk(eng, 'DISPATCH-01', 'https://clinic.ops.example/health') },
+      { label: 'IPv4 internet (PAT) still works from the clinic', check: eng => reaches(eng, 'DISPATCH-01', ip('203.0.113.80'), 'tcp', 443) },
+      { label: 'Guests still reach the portal', check: eng => httpOk(eng, 'GUEST-KIOSK', 'https://portal.example.net/') },
+      { label: 'Guest isolation still holds', check: eng => !reaches(eng, 'GUEST-KIOSK', A(eng, 'clinic', 20), 'tcp', 443) },
+    ],
+    evidence: [{ label: 'From an inside host, curl https://backup6.example.net/health (200 over IPv6)', match: ev => ev.type === 'http' && /backup6\.example\.net/.test(ev.url) && ev.status === 200 && !['BACKUP', 'PORTAL', 'RESOLVER', 'SIP-GW'].includes(ev.host) }],
+    hints: [
+      'Start where the backup runs. On CORE-SRV: "dig AAAA backup6.example.net" (the name has an IPv6 address only), then "ip -6 addr" and "ip -6 route". A host with nothing but an fe80:: link-local address and no default route cannot reach any IPv6 destination beyond its own link. DISPATCH-01 is the same: "ipconfig" lists only a Link-local IPv6 Address.',
+      'Hosts get their IPv6 prefix and default router from the router\'s Router Advertisements (SLAAC). On EDGE-RTR, "show ipv6 interface brief" shows IPv6 nowhere. IOS sends RAs only with "ipv6 unicast-routing" and an IPv6 prefix on the LAN interface, and hosts autoconfigure only from a /64. There is no NAT for IPv6 here: the ISP routes 2001:db8:42::/48 to 2001:db8:ffff:1::2, so EDGE-RTR needs exactly that WAN address, plus a default route to the ISP.',
+      'On EDGE-RTR: "configure terminal", "ipv6 unicast-routing", "interface g0/0", "ipv6 address 2001:db8:ffff:1::2/64", "interface g0/1.10", "ipv6 address 2001:db8:42:10::1/64", "exit", "ipv6 route ::/0 2001:db8:ffff:1::1" (or "ipv6 route ::/0 g0/0 fe80::1": a link-local next hop needs the exit interface), "end". Check "show ipv6 route", then "ipconfig" on DISPATCH-01 (IPv6 Address, Temporary IPv6 Address, Default Gateway fe80::…%7) and "curl -6 https://backup6.example.net/health" on CORE-SRV.',
+    ],
+    debrief: {
+      failure: 'IPv6 had never been enabled at the clinic. EDGE-RTR had no IPv6 addresses, no "ipv6 unicast-routing" and no IPv6 route, so it sent no Router Advertisements. Every host had only its fe80:: link-local address, which cannot leave the link, so the IPv6-only backup endpoint was unreachable. IPv4 kept working, which is why nobody noticed until the vendor dropped IPv4.',
+      evidence: '"dig AAAA" showed backup6.example.net has only 2001:db8:203::20; CORE-SRV\'s "ip -6 route" had no default route and curl failed at once ("Couldn\'t connect to server"); DISPATCH-01 listed only a Link-local IPv6 Address; "show ipv6 interface brief" on EDGE-RTR said unassigned everywhere.',
+      fix: '"ipv6 unicast-routing"; the WAN address the ISP routes the /48 to (2001:db8:ffff:1::2/64); a /64 from the delegated prefix on the clinic VLAN (2001:db8:42:10::1/64), which starts Router Advertisements so hosts build their own addresses (SLAAC); an IPv6 default route to the ISP. No NAT: the clinic\'s IPv6 addresses are globally routed.',
+      why: 'IPv6 hosts configure themselves from Router Advertisements (RFC 4861 and 4862): the RA carries the /64 prefix, the host adds its own 64-bit interface ID, and the router\'s link-local address becomes the default gateway. A router advertises only when it routes IPv6. Neighbor Discovery (ICMPv6 Neighbor Solicitation and Advertisement) replaces ARP. With a global address and a default router, hosts prefer IPv6 for names that have AAAA records (RFC 6724), and curl falls back to IPv4 quickly when IPv6 fails (Happy Eyeballs, RFC 8305).',
+      real: [
+        'Cisco: ipv6 unicast-routing · ipv6 address X/64 [eui-64] · ipv6 route ::/0 <next hop> · show ipv6 interface brief · show ipv6 route · show ipv6 neighbors · show ipv6 access-list',
+        'Windows: ipconfig (IPv6 Address, Temporary IPv6 Address, Link-local IPv6 Address with its %zone) · ping -6 · tracert -6 · route print -6 · netsh interface ipv6 show neighbors',
+        'Linux: ip -6 addr · ip -6 route · ip -6 neigh · ping -6 · traceroute -6 · dig AAAA · curl -6 -v',
+        'Address plan: the ISP delegates a /48; each VLAN gets a /64 (VLAN 10 -> 2001:db8:42:10::/64), the router takes ::1.',
+      ],
+      pitfalls: [
+        'Forgetting "ipv6 unicast-routing": the interfaces get addresses and answer ping, but the router sends no RAs and forwards nothing. Hosts stay link-local only.',
+        'A LAN prefix other than /64: hosts cannot autoconfigure, because SLAAC adds a 64-bit interface ID.',
+        'A link-local next hop without the exit interface: IOS rejects it ("Interface has to be specified for a link-local nexthop").',
+        'Looking for IPv6 NAT: the delegated prefix is routed end to end, and the ISP\'s route points at the WAN address you configure.',
+        'IPv6 ACLs end with implicit permits for Neighbor Discovery before the implicit "deny ipv6 any any". An explicit "deny ipv6 any any" comes before them and blocks ND too.',
+      ],
+    },
+    reference(eng) {
+      const p = eng.s.params;
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ipv6 unicast-routing', 'interface g0/0', `ipv6 address ${WAN6.edge}/64`,
+        `interface g0/1.${V(eng, 'clinic')}`, `ipv6 address ${net6(p, 'clinic', 1)}/64`, 'exit', `ipv6 route ::/0 ${WAN6.isp}`, 'end');
+      eng.advance(2);
     },
   },
 ];

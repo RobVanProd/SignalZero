@@ -3,6 +3,7 @@
 // do not learn a convention instead of the skill.
 import { device, addPort, link, resetDeviceCounter } from '../engine/model.js';
 import { parseIp as ip } from '../engine/ipv4.js';
+import { parseIp6 } from '../engine/ipv6.js';
 
 export const DEFAULT_PARAMS = {
   site: 42,
@@ -15,6 +16,37 @@ export const DEFAULT_PARAMS = {
 /** Address in a role's subnet. `role` is a key of params.octets, or a VLAN id for legacy calls. */
 export function net(p, role, host) {
   return `10.${p.site}.${p.octets[role]}.${host}`;
+}
+
+// ---- ipv6 (Act II)
+/**
+ * IPv6 address plan (docs/EXPANSION_PLAN.md): site prefix 2001:db8:<site>::/48 delegated by the ISP; VLAN n ->
+ * 2001:db8:<site>:<n>::/64 (the VLAN number written as the hex group, a common readable convention), router ::1.
+ * Returns the address as text (net6(p, 'clinic', 1) -> "2001:db8:42:10::1").
+ */
+export function net6(p, role, host = '') {
+  return `2001:db8:${p.site}:${p.vlans[role]}::${host}`;
+}
+export const site6 = p => `2001:db8:${p.site}::`;
+export const WAN6 = { net: '2001:db8:ffff:1::', isp: '2001:db8:ffff:1::1', edge: '2001:db8:ffff:1::2', ispLinkLocal: 'fe80::1', len: 64 };
+export const INET6 = { gw: '2001:db8:203::1', BACKUP: '2001:db8:203::20', PORTAL: '2001:db8:203::80', RESOLVER: '2001:db8:203::53', 'SIP-GW': '2001:db8:203::50' };
+export const BACKUP6_NAME = 'backup6.example.net';
+
+/** IPv6 on the provider side: ISP-PE routes the delegated /48 to EDGE-RTR's WAN address; internet hosts are dual-stack. */
+function addIpv6Internet(p, D) {
+  const isp = D['ISP-PE'];
+  isp.ipv6Routing = true;
+  isp.routes6 = [{ net: parseIp6(site6(p)), len: 48, nh: parseIp6(WAN6.edge), iface: null, ad: 1 }];
+  isp.acls6 = {};
+  isp.ports['Gi0/0'].ipv6 = { enable: true, addrs: [{ addr: parseIp6(WAN6.isp), len: 64 }], ll: parseIp6(WAN6.ispLinkLocal), raSuppress: null, filterIn: null, filterOut: null };
+  isp.ports['Gi0/1'].ipv6 = { enable: true, addrs: [{ addr: parseIp6(INET6.gw), len: 64 }], ll: null, raSuppress: null, filterIn: null, filterOut: null };
+  for (const id of ['BACKUP', 'PORTAL', 'RESOLVER', 'SIP-GW']) {
+    const d = D[id];
+    d.ipcfg.static6 = { addrs: [{ addr: parseIp6(INET6[id]), len: 64 }], gw: parseIp6(INET6.gw) };
+    d.ipcfg.acceptRa = false;
+  }
+  // The backup vendor's new endpoint: IPv6 only (nginx "listen [::]:443 ipv6only=on" for this server block).
+  D.BACKUP.services.nginx.sites.push({ ...nginxSite([BACKUP6_NAME], { '/health': { status: 200, body: '{"backup":"ready","uploads":"accepted","transport":"ipv6"}' }, '/': { status: 200, body: '{"service":"backup-api","version":"4.0","transport":"ipv6-only"}' } }), family: 6 });
 }
 
 export function dhcpdConf(p, o = {}) {
@@ -157,6 +189,8 @@ export function buildDistrict(params = DEFAULT_PARAMS) {
   inetHost('RESOLVER', '203.0.113.53', { 'public-dns': { kind: 'dns', unit: 'unbound', active: true, listen: [{ proto: 'udp', port: 53 }] } }, 'Public recursive DNS resolver');
   inetHost('SIP-GW', '203.0.113.50', { sip: { kind: 'sip', unit: 'kamailio', active: true, listen: [{ proto: 'udp', port: 5060 }, { proto: 'tcp', port: 5061 }] } }, 'Regional dispatch voice gateway');
 
+  addIpv6Internet(p, D); // ---- ipv6 (Act II)
+
   // ---------------------------------------------------------- ACCESS-SW
   const sw = add(device('ACCESS-SW', 'switch', 'ios', { model: 'C9200-24P', map: { x: 420, y: 190 }, role: 'Access switch, NOC floor' }));
   for (let i = 1; i <= 24; i++) addPort(sw, `Gi0/${i}`, { portfast: true });
@@ -276,7 +310,11 @@ export function buildDistrict(params = DEFAULT_PARAMS) {
     devices: D,
     links: L,
     patch: { cords: [] },
-    internet: { names: { 'backup.example.net': '203.0.113.20', 'portal.example.net': '203.0.113.80', 'sip.example.net': '203.0.113.50', 'resolver.example.net': '203.0.113.53' } },
+    internet: {
+      names: { 'backup.example.net': '203.0.113.20', 'portal.example.net': '203.0.113.80', 'sip.example.net': '203.0.113.50', 'resolver.example.net': '203.0.113.53' },
+      // ---- ipv6 (Act II): AAAA records on the public resolver (backup6 is IPv6-only: no A record)
+      names6: { [BACKUP6_NAME]: INET6.BACKUP, 'portal.example.net': INET6.PORTAL, 'sip.example.net': INET6['SIP-GW'], 'resolver.example.net': INET6.RESOLVER },
+    },
     flows: [],
   };
   return state;

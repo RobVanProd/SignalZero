@@ -5,6 +5,7 @@ import { routeTable } from './routing.js';
 import { probe, sendPacket } from './trace.js';
 import { dhcpClient, applyDhcpResult, fleetDhcp, dhcpHostTick, httpRequest, namedLoad, dhcpdStart } from './services.js';
 import { longIf, macCisco } from './model.js';
+import { routeTable6, v6AfterChange, v6Periodic, RA_INTERVAL } from './net6.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -43,6 +44,7 @@ export class Engine {
     s.flowState ??= {};
     s.timers ??= { fleet: 0, storm: 0, cdp: 0, flows: 0 };
     s.internet ??= { names: {} };
+    s.timers.ra ??= RA_INTERVAL; // ---- ipv6: periodic Router Advertisements
     this.cache = {};
     this.rev = 0;
     this._stpDirty = true;
@@ -103,6 +105,13 @@ export class Engine {
   routes(devId) {
     const c = (this.cache.rt ||= new Map());
     if (!c.has(devId)) c.set(devId, routeTable(this, this.s.devices[devId]));
+    return c.get(devId);
+  }
+
+  /** IPv6 routing table of a router (net6.js). */
+  routes6(devId) {
+    const c = (this.cache.rt6 ||= new Map());
+    if (!c.has(devId)) c.set(devId, routeTable6(this, this.s.devices[devId]));
     return c.get(devId);
   }
 
@@ -240,6 +249,8 @@ export class Engine {
       }
       if (d.kind === 'fleet' && d.nic === end.port) fleetDhcp(this, d, { all: true });
     }
+    // ---- ipv6: link-up hosts send Router Solicitations; newly advertising router interfaces send initial RAs
+    v6AfterChange(this, ups);
     this.evaluateFlows();
   }
 
@@ -261,6 +272,7 @@ export class Engine {
     }
     this.changed();
     this.ensure();
+    v6AfterChange(this, []); // ---- ipv6: RAs from interfaces that already advertise at build time
     this.evaluateFlows();
   }
 
@@ -289,6 +301,7 @@ export class Engine {
         s.timers.fleet = s.t + 60;
         for (const d of Object.values(s.devices)) if (d.kind === 'fleet' && this.portUp(d.id, d.nic)) fleetDhcp(this, d);
       }
+      if (s.t >= s.timers.ra) { s.timers.ra = s.t + RA_INTERVAL; if (v6Periodic(this)) this.evaluateFlows(); } // ---- ipv6
       if (s.t >= s.timers.storm) { s.timers.storm = s.t + 12; this.stormLogs(); }
       if (s.t >= s.timers.cdp) { s.timers.cdp = s.t + 60; this.cdpLogs(); }
       if (s.t >= s.timers.flows) { s.timers.flows = s.t + 5; this.evaluateFlows(); }

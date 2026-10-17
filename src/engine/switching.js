@@ -484,7 +484,8 @@ export function flood(eng, devId, portName, tag, opts = {}) {
     } else if (d.kind === 'router') {
       let l3if = null;
       if (cur.tag === null) {
-        if (p.ip) l3if = p.name;
+        // ---- ipv6: a routed port with only IPv6 configured also terminates untagged frames
+        if (p.ip || p.ipv6?.enable || p.ipv6?.addrs?.length || p.ipv6?.ll) l3if = p.name;
         else {
           const nat = Object.values(d.subifs).find(s => s.parent === p.name && s.native);
           if (nat) l3if = nat.name;

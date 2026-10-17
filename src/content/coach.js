@@ -10,6 +10,7 @@ import { parseDhcpd } from '../engine/parsers/dhcpd.js';
 import { parseZone } from '../engine/parsers/zone.js';
 import { parseIp } from '../engine/ipv4.js';
 import { net } from './district.js';
+import { parseIp6 } from '../engine/ipv6.js'; // ---- ipv6
 
 /** Interface token in canonical short form: g0/1, gi0/1, GigabitEthernet0/1 -> g0/1. */
 function ifTok(t) {
@@ -254,5 +255,70 @@ export const COACH = {
     },
   ],
 };
+
+// ---- ipv6 (Act II): first exposure to IPv6, coached in small steps like incidents 1-4.
+const r6 = c => c.eng.s.devices['EDGE-RTR'];
+const has6 = (c, port, text) => (r6(c).ports[port] || r6(c).subifs[port])?.ipv6?.addrs?.some(a => a.addr === parseIp6(text));
+COACH.M11 = [
+  {
+    id: 'ipconfig', title: 'Look at the PC\'s IPv6 addresses', where: 'DISPATCH-01', cmd: { dev: 'DISPATCH-01', text: 'ipconfig' },
+    how: 'At DISPATCH-01 type ipconfig.',
+    done: c => c.ran('DISPATCH-01', l => /^ipconfig(\s+\/all)?\s*$/i.test(l.trim())),
+    learned: 'Above the IPv4 lines there is a "Link-local IPv6 Address" fe80::…%7. Every IPv6 interface gives itself one; "%7" is the zone (the interface number), needed because every link uses the same fe80:: prefix. There is no "IPv6 Address" and the Default Gateway is IPv4 only: nothing on this network has told the PC about an IPv6 prefix or router.',
+  },
+  {
+    id: 'lookup', title: 'Ask DNS for the new backup endpoint', where: 'DISPATCH-01', cmd: { dev: 'DISPATCH-01', text: 'nslookup backup6.example.net' },
+    how: 'Type nslookup backup6.example.net.',
+    done: c => c.ev(e => e.type === 'dns' && e.host === 'DISPATCH-01' && /backup6/.test(e.name || '')),
+    learned: 'One address, 2001:db8:203::20: an AAAA record and no A record, so this name works only over IPv6. The PC asked its DNS server over IPv4 and got the IPv6 answer without trouble; reaching that address is the problem.',
+  },
+  {
+    id: 'server-route', title: 'Check the backup server\'s IPv6 routes', where: 'CORE-SRV', cmd: { dev: 'CORE-SRV', text: 'ip -6 route' },
+    how: 'Open CORE-SRV (it runs the backup job) and type ip -6 route.',
+    done: c => c.ran('CORE-SRV', l => /^ip\s+-6\s+r/i.test(l.trim())),
+    learned: 'Only "fe80::/64": the server can reach its link-local neighbours and nothing else, so "curl" fails at once ("Network is unreachable"). IPv6 hosts learn their prefix and default router from Router Advertisements (RAs) sent by the router, and none has arrived.',
+  },
+  {
+    id: 'brief', title: 'See where IPv6 is enabled on the router', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'show ipv6 interface brief' },
+    how: 'Open EDGE-RTR, type enable, then show ipv6 interface brief.',
+    done: c => c.ran('EDGE-RTR', l => iosIs(l, 'show ipv6 interface brief')),
+    learned: '"unassigned" under every interface: IPv6 is not enabled anywhere on EDGE-RTR. A router with no IPv6 sends no Router Advertisements, which is why the clinic hosts are link-local only.',
+  },
+  {
+    id: 'routing', title: 'Turn on IPv6 routing', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'ipv6 unicast-routing' },
+    how: 'Type configure terminal (after enable, if the prompt still ends in ">"), then ipv6 unicast-routing.',
+    done: c => !!r6(c).ipv6Routing,
+    learned: 'EDGE-RTR now forwards IPv6 and will send RAs on every LAN interface that has IPv6. Without this command an IOS router is an IPv6 host: it can hold addresses and answer pings, but it advertises and forwards nothing.',
+  },
+  {
+    id: 'wan', title: 'Address the WAN link', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'ipv6 address 2001:db8:ffff:1::2/64' },
+    how: 'Type interface g0/0, then ipv6 address 2001:db8:ffff:1::2/64 (the address on the ISP\'s sheet).',
+    done: c => has6(c, 'Gi0/0', '2001:db8:ffff:1::2'),
+    learned: 'This is the address the ISP routes the clinic\'s whole 2001:db8:42::/48 to. There is no NAT for IPv6 here: every clinic address is globally unique and is routed end to end.',
+  },
+  {
+    id: 'lan', title: 'Give the clinic VLAN a /64', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'ipv6 address 2001:db8:42:10::1/64' },
+    how: 'Type interface g0/1.10 (the clinic VLAN subinterface), then ipv6 address 2001:db8:42:10::1/64.',
+    done: c => c.goal(1),
+    learned: 'At once EDGE-RTR sent a Router Advertisement on VLAN 10 carrying 2001:db8:42:10::/64. Every host there built its own address from it (SLAAC): the prefix plus a 64-bit interface ID, which is why the prefix must be a /64. Their default router is EDGE-RTR\'s link-local address.',
+  },
+  {
+    id: 'default', title: 'Add the IPv6 default route', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'ipv6 route ::/0 2001:db8:ffff:1::1' },
+    how: 'Type exit, then ipv6 route ::/0 2001:db8:ffff:1::1, then end. (A link-local next hop needs the exit interface too: ipv6 route ::/0 g0/0 fe80::1.)',
+    done: c => c.goal(0),
+    learned: '"show ipv6 route" now has "S ::/0 [1/0] via 2001:DB8:FFFF:1::1". ::/0 is the IPv6 default route, the same idea as 0.0.0.0/0.',
+  },
+  {
+    id: 'slaac', title: 'Look at the PC again', where: 'DISPATCH-01', cmd: { dev: 'DISPATCH-01', text: 'ipconfig' },
+    how: 'At DISPATCH-01 type ipconfig.',
+    done: c => c.ev(e => e.type === 'ipconfig6' && e.host === 'DISPATCH-01'),
+    learned: 'Now there is an "IPv6 Address" (2001:db8:42:10:… with a random-looking interface ID that Windows keeps), a "Temporary IPv6 Address" that Windows prefers for outgoing connections (privacy, RFC 4941), and a Default Gateway fe80::…%7 listed before the IPv4 gateway.',
+  },
+  {
+    id: 'verify', title: 'Run the backup check over IPv6', where: 'CORE-SRV', cmd: { dev: 'CORE-SRV', text: 'curl -6 https://backup6.example.net/health' },
+    how: 'At CORE-SRV type curl -6 https://backup6.example.net/health. (curl -v shows which address family it used.)',
+    done: () => false, learned: '',
+  },
+];
 
 export function coachSteps(missionId) { return COACH[missionId] || null; }
