@@ -889,7 +889,10 @@ function runSpf(eng, d, rt) {
       inter.push(r);
     }
   }
-  rt.interArea = [...new Map(inter.sort((a, b) => a.metric - b.metric).reverse().map(r => [`${r.net}/${r.len}`, r])).values()].map(r => ({ net: r.net, len: r.len, metric: r.metric }));
+  // the best inter-area route per prefix, which an ABR re-advertises into its non-backbone areas
+  const bestInter = new Map();
+  for (const r of inter) { const k = `${r.net}/${r.len}`; if (!bestInter.has(k) || r.metric < bestInter.get(k).metric) bestInter.set(k, r); }
+  rt.interArea = [...bestInter.values()].map(r => ({ net: r.net, len: r.len, metric: r.metric }));
   // ASBR reachability: intra-area first, then ASBR summaries (type 4)
   const asbrRoute = rid => {
     let best = null;

@@ -349,9 +349,9 @@ test('M12 start: no neighbour, branch timers 5/20 vs clinic 10/40, a static AD-1
   assert.match(text(run('BRANCH-RTR', 'enable', 'show ip ospf interface g0/0')), /Hello 5, Dead 20/);
   assert.match(text(run('EDGE-RTR', 'show ip route')), /^S {8}10\.43\.10\.0\/24 \[1\/0\] via 10\.42\.10\.254$/m);
   assert.equal(httpOk(eng, 'BRANCH-PC', 'https://clinic.ops.example/health'), false);
-  assert.match(text(run('BRANCH-PC', 'curl https://clinic.ops.example/health')), /curl: \(6\) Could not resolve host: clinic\.ops\.example/, 'the first symptom: the branch cannot even reach DNS');
-  assert.equal(httpOk(eng, 'BRANCH-PC', 'https://portal.example.net/'), false, 'no DNS for the internet either: the branch uses the clinic\'s DNS server');
-  assert.equal(reaches(eng, 'BRANCH-PC', ip('203.0.113.80'), 'tcp', 443), true, 'but its own internet (PAT on BRANCH-RTR) works');
+  assert.match(text(run('BRANCH-PC', 'curl https://clinic.ops.example/health')), /curl: \(6\) Could not resolve host: clinic\.ops\.example/, 'the first symptom: the clinic DNS server is out of reach, the public one does not know the name');
+  assert.match(text(run('BRANCH-PC', 'nslookup clinic.ops.example')), /DNS request timed out/, 'nslookup asks the first DNS server (10.42.10.10)');
+  assert.equal(httpOk(eng, 'BRANCH-PC', 'https://portal.example.net/'), true, 'the branch internet works: own PAT, secondary DNS is a public resolver');
   assert.equal(eng.s.changeLog.filter(c => c.actor === 'contractor').length >= 2, true);
 });
 

@@ -11,7 +11,7 @@ Built for mission M12 "THE BRANCH CLINIC". Merged into `docs/SIMULATION_MODEL.md
 | BRANCH-RTR | IOS router (ISR4321), zone `branch` | Gi0/0 172.16.42.2/30 (private WAN), Gi0/1 198.51.100.10/30 (internet, `ip nat outside`), Gi0/2 10.43.10.1/24 (LAN, `ip nat inside`) | PAT for the branch LAN, default route to ISP-PE 198.51.100.9, vty `access-class VTY-MGMT` (clinic VLAN and the WAN /30 only), SSH only. |
 | ISP-PE Gi0/2 | provider port | 198.51.100.9/30 | The branch's own internet circuit (DC-51207), so later VPN work can build IPsec between 198.51.100.2 and 198.51.100.10. |
 | BRANCH-SW | unmanaged bridge | — | Branch LAN switch. |
-| BRANCH-PC | Windows 11 | 10.43.10.50/24 static, gateway .1, DNS 10.42.10.10 | File share (SMB, TCP 445) and Windows OpenSSH Server (TCP 22, remote support). |
+| BRANCH-PC | Windows 11 | 10.43.10.50/24 static, gateway .1, DNS 10.42.10.10 then 203.0.113.53 | File share (SMB, TCP 445) and Windows OpenSSH Server (TCP 22, remote support). With the WAN down, internal names fail (the public resolver answers NXDOMAIN) while internet names keep working. |
 
 The branch site octet follows the clinic site (`branchSite(p) = p.site + 1`, 43 in the campaign), so randomised challenge plans never collide with the clinic's 10.&lt;site&gt;.0.0/16. Device indexes 60–63 keep the branch MAC addresses stable whatever other builds add.
 

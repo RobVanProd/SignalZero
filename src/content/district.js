@@ -309,7 +309,8 @@ export function buildDistrict(params = DEFAULT_PARAMS) {
     for (let i = 1; i <= 8; i++) addPort(bsw, `p${i}`);
     const bpc = add(device('BRANCH-PC', 'host', 'windows', {
       index: 63, map: { x: 160, y: 600 }, role: 'Branch clinic reception PC (file share, remote support SSH)', zone: 'branch',
-      ipcfg: { dhcp: false, static: { addr: ip(bnet(p, 50)), len: 24, gw: ip(bnet(p, 1)), dns: [ip(net(p, 'clinic', 10))] } },
+      // DNS: the clinic's server first, a public resolver second (internet names keep working when the WAN is down)
+      ipcfg: { dhcp: false, static: { addr: ip(bnet(p, 50)), len: 24, gw: ip(bnet(p, 1)), dns: [ip(net(p, 'clinic', 10)), ip('203.0.113.53')] } },
       services: {
         smb: { kind: 'smb', unit: 'LanmanServer', active: true, listen: [{ proto: 'tcp', port: 445 }] },
         // Windows OpenSSH Server (optional feature) enabled by branch IT for remote support.
