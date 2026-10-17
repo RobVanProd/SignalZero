@@ -102,11 +102,12 @@ export function routeTable(eng, d) {
   return { table: installed, notInstalled };
 }
 
+/** Longest matching prefix, then lowest administrative distance, then lowest metric. */
 export function lookup(table, ip) {
   let best = null;
   for (const r of table) {
     if (!inSubnet(ip, r.net, r.len)) continue;
-    if (!best || r.len > best.len || (r.len === best.len && r.ad < best.ad)) best = r;
+    if (!best || r.len > best.len || (r.len === best.len && (r.ad < best.ad || (r.ad === best.ad && (r.metric ?? 0) < (best.metric ?? 0))))) best = r;
   }
   return best;
 }
