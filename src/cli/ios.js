@@ -197,8 +197,9 @@ function buildGrammar(kind) {
     unimpl(ex, 'show errdisable recovery', 'show interfaces status err-disabled');
     g.add(ex, 'show ip dhcp snooping', 'sh-snoop');
     g.add(ex, 'show vtp status', 'sh-vtp');
+    // Both TDR commands are privileged EXEC on Catalyst IOS: in user mode "cable-diagnostics" is invalid input.
     g.add('exec', 'test cable-diagnostics tdr interface <IF>', 'tdr-run');
-    g.add(ex, 'show cable-diagnostics tdr interface <IF>', 'tdr-show');
+    g.add('exec', 'show cable-diagnostics tdr interface <IF>', 'tdr-show');
   }
   if (kind === 'router') {
     g.add(ex, 'show ip route', 'sh-route');
@@ -306,6 +307,9 @@ function buildGrammar(kind) {
     g.add(ifm, 'switchport trunk allowed vlan all', 'sw-allowed-all');
     g.add(ifm, 'switchport trunk allowed vlan none', 'sw-allowed-none');
     g.add(ifm, 'switchport trunk native vlan <VLAN>', 'sw-native');
+    g.add(ifm, 'no switchport trunk native vlan', 'sw-native-default');
+    g.add(ifm, 'no switchport trunk allowed vlan', 'sw-allowed-all');
+    g.add(ifm, 'no switchport nonegotiate', 'noop');
     g.add(ifm, 'switchport trunk encapsulation dot1q', 'noop');
     g.add(ifm, 'switchport nonegotiate', 'noop');
     g.add(ifm, 'spanning-tree portfast', 'portfast');
@@ -394,7 +398,7 @@ export function iosExecute(eng, sess, raw) {
   if (m.error) {
     if (m.error === 'ambiguous') return { lines: [`% Ambiguous command:  "${line.trim()}"`], prompt };
     if (m.error === 'incomplete') return { lines: ['% Incomplete command.', ''], prompt };
-    if (sess.mode === 'user' && /^\s*(conf|sh\w*\s+run|wr)/i.test(line)) return { lines: [...caretLines(prompt, line, m.pos), '(Hint: privileged commands need "enable" first.)'].map((x, i) => (i === 2 ? { t: 'note', text: x } : x)), prompt };
+    if (sess.mode === 'user' && /^\s*(conf|sh\w*\s+(run|start|cable|log)|wr|test\s|cl)/i.test(line)) return { lines: [...caretLines(prompt, line, m.pos), '(Hint: privileged commands need "enable" first.)'].map((x, i) => (i === 2 ? { t: 'note', text: x } : x)), prompt };
     return { lines: caretLines(prompt, line, m.pos), prompt };
   }
   const ctx = { eng, dev, sess, args: m.args, line: line.trim(), raw, prompt, cmd: m.cmd };
@@ -792,6 +796,7 @@ function run(handler, ctx) {
     case 'sw-allowed-all': for (const p of ifTargets(ctx)) p.allowed = 'all'; mut(ctx); return done();
     case 'sw-allowed-none': for (const p of ifTargets(ctx)) p.allowed = []; mut(ctx); return done();
     case 'sw-native': for (const p of ifTargets(ctx)) p.native = args.vlan; mut(ctx); return done();
+    case 'sw-native-default': for (const p of ifTargets(ctx)) p.native = 1; mut(ctx); return done();
     case 'portfast': {
       for (const p of ifTargets(ctx)) p.portfast = true;
       L.push('%Warning: portfast should only be enabled on ports connected to a single', ' host. Connecting hubs, concentrators, switches, bridges, etc... to this', ' interface  when portfast is enabled, can cause temporary bridging loops.', ' Use with CAUTION');

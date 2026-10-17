@@ -339,8 +339,9 @@ export function showSpanningTree(eng, d, vlan) {
       const r = stpRecord(eng, d.id, v, p.name);
       const l = eng.linkAt(d.id, p.name);
       const c = portCost(l ? eng.linkStatus(l.id).speed : 1000);
-      const sts = (r.st === 'blocking' || r.st === 'listening') && d.stp.mode === 'rapid-pvst' ? 'BLK' : stCode[r.st]; // RSTP has no listening: discarding
-      const type = `${r.p2p === false ? 'Shr' : 'P2p'}${r.edge ? ' Edge' : ''}${d.stp.mode === 'rapid-pvst' && r.peer === 'pvst' ? ' Peer(STP)' : ''}`;
+      // RSTP has no listening state: discarding. A PVID-inconsistent port is "broken": BKN* and *PVID_Inc.
+      const sts = r.inc ? 'BKN*' : (r.st === 'blocking' || r.st === 'listening') && d.stp.mode === 'rapid-pvst' ? 'BLK' : stCode[r.st];
+      const type = `${r.p2p === false ? 'Shr' : 'P2p'}${r.edge ? ' Edge' : ''}${d.stp.mode === 'rapid-pvst' && r.peer === 'pvst' ? ' Peer(STP)' : ''}${r.inc ? ` *${r.inc}_Inc` : ''}`;
       L.push(`${pad(p.name, 20)}${pad(roleCode[r.role] || 'Desg', 5)}${pad(sts, 4)}${pad(c, 10)}${pad(`128.${Object.keys(d.ports).indexOf(p.name) + 1}`, 9)}${type}`);
     }
     L.push('');
@@ -608,7 +609,7 @@ export function showTdr(eng, d, name) {
   }
   const L = [`TDR test last run on: ${w.mon} ${w.day} ${String(w.hh).padStart(2, '0')}:${String(w.mm).padStart(2, '0')}:${String(w.ss).padStart(2, '0')}`, '', 'Interface Speed Local pair Pair length        Remote pair Pair status', '--------- ----- ---------- ------------------ ----------- --------------------'];
   ['A', 'B', 'C', 'D'].forEach((pair, i) => {
-    L.push(`${pad(i === 0 ? name : '', 10)}${pad(i === 0 ? 'auto' : '', 6)}${pad(`Pair ${pair}`, 11)}${pad(`${len}    +/- 1  meters`, 19)}${pad(status === 'Normal' ? `Pair ${pair}` : 'N/A', 12)}${status}`);
+    L.push(`${pad(i === 0 ? name : '', 10)}${pad(i === 0 ? 'auto' : '', 6)}${pad(`Pair ${pair}`, 11)}${pad(`${pad(len, 4)} +/- 4  meters`, 19)}${pad(status === 'Normal' ? `Pair ${pair}` : 'N/A', 12)}${status}`);
   });
   return L;
 }

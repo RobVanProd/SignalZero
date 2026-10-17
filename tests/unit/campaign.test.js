@@ -108,7 +108,8 @@ test('M05: VLAN alone, ACL alone, ACL without DNS and ACL without permit-any all
   let eng = buildMissionStart(buildDistrict, Engine, 4);
   let run = cli(eng);
   run('ACCESS-SW', 'enable', 'configure terminal', 'interface g0/6', 'switchport access vlan 30', 'end');
-  run('GUEST-KIOSK', 'ipconfig /renew');
+  // The Wi-Fi kiosk sees no link change; a plain renew is a unicast from its old address and times out.
+  run('GUEST-KIOSK', 'ipconfig /release', 'ipconfig /renew');
   assert.equal(MISSIONS[4].goals[0].check(eng), true, 'kiosk is now in the guest subnet');
   assert.equal(MISSIONS[4].goals[1].check(eng), false, 'but the router still forwards guest -> clinic');
   // ACL without the DNS permit

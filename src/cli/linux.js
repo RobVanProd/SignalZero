@@ -344,23 +344,83 @@ function systemctl(eng, sess, d, args) {
   return { lines: L };
 }
 
+/** Split a command line on "|" the way a shell does: not inside quotes, not when escaped. */
+function splitPipes(line) {
+  const segs = [];
+  let cur = '';
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\' && q !== "'" && i + 1 < line.length) { cur += ch + line[++i]; continue; }
+    if (q) { if (ch === q) q = null; cur += ch; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === '|') { segs.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  segs.push(cur);
+  return segs;
+}
+
+/** Shell words with quoting removed (single quotes literal; in double quotes a backslash only escapes $ ` " \\). */
+function shellWords(str) {
+  const words = [];
+  let w = null;
+  let q = null;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (q === "'") { if (ch === "'") q = null; else w += ch; continue; }
+    if (q === '"') {
+      if (ch === '"') q = null;
+      else if (ch === '\\' && '$`"\\'.includes(str[i + 1] ?? '')) w += str[++i];
+      else w += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) { if (w !== null) { words.push(w); w = null; } continue; }
+    if (w === null) w = '';
+    if (ch === "'" || ch === '"') q = ch;
+    else if (ch === '\\' && i + 1 < str.length) w += str[++i];
+    else w += ch;
+  }
+  if (w !== null) words.push(w);
+  return words;
+}
+
+/** GNU grep basic regular expression -> JavaScript RegExp source (\| \( \) \{ \} \+ \? are the operators). */
+function breToJs(pat) {
+  let out = '';
+  for (let i = 0; i < pat.length; i++) {
+    const ch = pat[i];
+    if (ch === '\\' && i + 1 < pat.length) {
+      const n = pat[++i];
+      out += '|(){}+?'.includes(n) ? n : `\\${n}`;
+    } else out += '|(){}+?'.includes(ch) ? `\\${ch}` : ch;
+  }
+  return out;
+}
+
 function applyPipes(lines, pipes) {
   let out = lines.map(l => (typeof l === 'string' ? l : l.text));
   for (const p of pipes) {
-    const [cmd, ...rest] = p.trim().split(/\s+/);
-    if (cmd === 'grep') {
-      const ci = rest.includes('-i');
-      const v = rest.includes('-v');
-      const pat = rest.filter(x => !x.startsWith('-')).join(' ').replace(/^['"]|['"]$/g, '');
+    const [cmd, ...rest] = shellWords(p.trim());
+    if (cmd === 'grep' || cmd === 'egrep') {
+      const flags = rest.filter(x => /^-[a-zA-Z]+$/.test(x)).join('');
+      const words = rest.filter(x => !/^-[a-zA-Z]+$/.test(x));
+      if (!words.length) return ['Usage: grep [OPTION]... PATTERNS [FILE]...', "Try 'grep --help' for more information."];
+      const ci = flags.includes('i');
+      const v = flags.includes('v');
+      const ext = cmd === 'egrep' || flags.includes('E');
+      const src = flags.includes('F') ? words[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : ext ? words[0] : breToJs(words[0]);
       let re;
-      try { re = new RegExp(pat, ci ? 'i' : ''); } catch { re = new RegExp(pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), ci ? 'i' : ''); }
+      try { re = new RegExp(src, ci ? 'i' : ''); } catch { return [`grep: Unmatched ( or \\(`]; }
       out = out.filter(l => re.test(l) !== v);
+      if (flags.includes('c')) out = [String(out.length)];
     } else if (cmd === 'tail' || cmd === 'head') {
       const n = Number(rest[rest.indexOf('-n') + 1]) || Number((rest[0] || '').replace('-', '')) || 10;
       out = cmd === 'tail' ? out.slice(-n) : out.slice(0, n);
     } else if (cmd === 'less' || cmd === 'more' || cmd === 'cat') {
       // pager: no-op
     } else if (cmd === 'wc' && rest[0] === '-l') out = [String(out.length)];
+    else if (cmd === undefined) return ['-bash: syntax error near unexpected token `|\''];
     else return [`${cmd}: command not found`];
   }
   return out;
@@ -370,7 +430,7 @@ export function linuxExecute(eng, sess, raw) {
   const d = eng.s.devices[sess.dev];
   let line = raw.trim().replace(/^sudo\s+/, '');
   if (!line) return { lines: [] };
-  const segs = line.split('|');
+  const segs = splitPipes(line);
   const pipes = segs.slice(1);
   line = segs[0].trim();
   const parts = line.split(/\s+/);

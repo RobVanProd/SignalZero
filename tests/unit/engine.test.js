@@ -139,7 +139,7 @@ test('removing NAT breaks only the return path (asymmetric failure)', () => {
   assert.equal(r.replyLost, true, 'the reply has no route back to a private address');
 });
 
-test('Windows APIPA retry and DHCP INIT-REBOOT NAK after a VLAN move', () => {
+test('DHCP after a VLAN move: renew is a unicast that times out; a link bounce (INIT-REBOOT) is NAKed', () => {
   const eng = buildMissionStart(buildDistrict, Engine, 4);
   const run = cli(eng);
   const k = eng.s.devices['GUEST-KIOSK'];
@@ -147,8 +147,14 @@ test('Windows APIPA retry and DHCP INIT-REBOOT NAK after a VLAN move', () => {
   run('ACCESS-SW', 'enable', 'configure terminal', 'interface g0/6', 'switchport access vlan 30', 'end');
   assert.equal(k.lease.addr, before, 'no link flap, so the client keeps its stale lease');
   const r = run('GUEST-KIOSK', 'ipconfig /renew');
-  assert.ok(r.frames.some(f => /NAK/.test(f.info)), 'server NAKs the old-subnet address');
-  assert.notEqual(k.lease.addr, before);
+  assert.ok(!r.frames.some(f => /NAK/.test(f.info)), 'the unicast renewal never reaches the server, so nothing NAKs it');
+  assert.equal(k.lease.addr, before, 'the unexpired lease is kept');
+  // A wired PC whose switch port is moved and bounced re-confirms its address with a broadcast INIT-REBOOT.
+  const d = eng.s.devices['DISPATCH-01'];
+  const old = d.lease.addr;
+  run('ACCESS-SW', 'configure terminal', 'interface g0/2', 'switchport access vlan 30', 'shutdown', 'no shutdown', 'end');
+  assert.notEqual(d.lease.addr, old);
+  assert.equal(d.lease.addr >>> 8, ip('10.42.30.0') >>> 8, 'NAK, then DORA in the guest subnet');
 });
 
 test('BPDU guard err-disables an edge port that hears a switch', () => {

@@ -90,7 +90,9 @@ export const FAULTS = [
   {
     id: 'wrong-access-vlan', title: 'Host port in the wrong VLAN', objectives: ['2.2', '5.3', '1.7'],
     inject(eng) { cli(eng)('DIST-SW-B', 'enable', 'configure terminal', 'interface g0/2', `switchport access vlan ${vl(eng, 'guest')}`, 'end'); reboot(eng, 'NURSE-STATION'); return { change: 'DIST-SW-B: port moves for the ward refit' }; },
-    fix(eng) { cli(eng)('DIST-SW-B', 'enable', 'configure terminal', 'interface g0/2', `switchport access vlan ${vl(eng, 'clinic')}`, 'end'); cli(eng)('NURSE-STATION', 'ipconfig /renew'); },
+    // No link change on a VLAN move: the PC keeps its guest-subnet lease, and a plain renew (unicast through a gateway it
+    // can no longer reach) times out. Release and renew (or bounce the port) makes it start over.
+    fix(eng) { cli(eng)('DIST-SW-B', 'enable', 'configure terminal', 'interface g0/2', `switchport access vlan ${vl(eng, 'clinic')}`, 'end'); cli(eng)('NURSE-STATION', 'ipconfig /release', 'ipconfig /renew'); },
   },
   {
     id: 'trunk-pruned', title: 'VLAN removed from the riser trunks', objectives: ['2.2', '5.3'],
@@ -147,8 +149,13 @@ export const FAULTS = [
   },
   {
     id: 'acl-dns', title: 'Guest ACL blocks DNS', objectives: ['4.3', '1.4', '5.3'],
-    inject(eng) { cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ip access-list extended GUEST-IN', 'no 10', 'end'); eng.s.devices['GUEST-KIOSK'].dnsCache = {}; return { change: 'EDGE-RTR: ACL hardening (security review)' }; },
-    fix(eng) { const g = `10.${P(eng).site}.${P(eng).octets.guest}.0`; cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ip access-list extended GUEST-IN', `10 permit udp ${g} 0.0.0.255 host ${net(P(eng), 'clinic', 10)} eq domain`, 'end'); },
+    inject(eng) {
+      const dns = eng.s.devices['EDGE-RTR'].acls['GUEST-IN'].entries.find(e => e.proto === 'udp' && e.dop?.ports?.includes(53));
+      cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ip access-list extended GUEST-IN', `no ${dns.seq}`, 'end');
+      eng.s.devices['GUEST-KIOSK'].dnsCache = {};
+      return { change: 'EDGE-RTR: ACL hardening (security review)', seq: dns.seq };
+    },
+    fix(eng, ctx) { const g = `10.${P(eng).site}.${P(eng).octets.guest}.0`; cli(eng)('EDGE-RTR', 'enable', 'configure terminal', 'ip access-list extended GUEST-IN', `${ctx.seq} permit udp ${g} 0.0.0.255 host ${net(P(eng), 'clinic', 10)} eq domain`, 'end'); },
   },
   {
     id: 'stp-off', title: 'Spanning tree disabled with redundant risers', objectives: ['2.2', '5.3', '3.2'],

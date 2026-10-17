@@ -3,7 +3,7 @@ import { linkStatus } from './link.js';
 import { applyStp, tickStp, detectStorms, flood, carries } from './switching.js';
 import { routeTable } from './routing.js';
 import { probe, sendPacket } from './trace.js';
-import { dhcpClient, applyDhcpResult, fleetDhcp, httpRequest, namedLoad, dhcpdStart } from './services.js';
+import { dhcpClient, applyDhcpResult, fleetDhcp, dhcpHostTick, httpRequest, namedLoad, dhcpdStart } from './services.js';
 import { longIf, macCisco } from './model.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -212,6 +212,7 @@ export class Engine {
         this.ensure();
       }
     }
+    this.pvidLogs(silent);
     const ups = [];
     for (const l of Object.values(s.links)) {
       const up = this.linkStatus(l.id).up;
@@ -229,11 +230,11 @@ export class Engine {
       }
     }
     this.checkStormOnset();
-    // Media connect: DHCP clients start or re-confirm their lease.
+    // Media connect: DHCP clients start (DORA) or re-confirm a remembered lease (INIT-REBOOT).
     for (const end of ups) {
       const d = s.devices[end.dev];
       if (d.kind === 'host' && d.ipcfg.dhcp && d.nic === end.port && d.managedDhcp !== false) {
-        const res = dhcpClient(this, d, { mode: 'renew' });
+        const res = dhcpClient(this, d, { mode: 'reboot' });
         applyDhcpResult(this, d, res);
         this.ensure();
       }
@@ -249,6 +250,7 @@ export class Engine {
     applyStp(this, true);
     this.cache = {};
     for (const l of Object.values(this.s.links)) this.s.linkMemo[l.id] = this.linkStatus(l.id).up;
+    this.pvidLogs(true);
     for (const d of Object.values(this.s.devices)) {
       if (d.kind !== 'host') continue;
       if (d.services?.named?.active) namedLoad(this, d);
@@ -271,11 +273,12 @@ export class Engine {
       s.t += h;
       if (tickStp(this)) { this.cache = {}; this.rev++; this.checkStormOnset(); this.evaluateFlows(); }
       this.tickCounters(h);
-      // Windows clients stuck on APIPA retry DHCP every 5 minutes.
       for (const d of Object.values(s.devices)) {
-        if (d.kind !== 'host' || !d.ipcfg.dhcp || d.lease || d.released || d.managedDhcp === false) continue;
-        if (d.os !== 'windows') continue;
+        if (d.kind !== 'host' || !d.ipcfg.dhcp || d.released || d.managedDhcp === false || d.powered === false) continue;
         if (!this.portUp(d.id, d.nic)) continue;
+        // Leased clients follow the RFC 2131 timers: T1 unicast renewal, T2 broadcast rebinding, expiry.
+        if (d.lease) { if (dhcpHostTick(this, d)) this.evaluateFlows(); continue; }
+        // Clients without a lease (Windows on APIPA, dhclient after a failed attempt) retry every 5 minutes.
         if (s.t >= (d.nextDhcpRetry ?? 300)) {
           const res = dhcpClient(this, d, { mode: 'discover' });
           applyDhcpResult(this, d, res);
@@ -315,6 +318,32 @@ export class Engine {
         }
       }
     }
+  }
+
+  /** PVST+ PVID-inconsistency syslog: entering the state on BPDU receipt, leaving it when the native VLANs match. */
+  pvidLogs(silent = false) {
+    const s = this.s;
+    const now = {};
+    for (const [key, inc] of this.pvid || []) now[key] = { local: inc.local, peer: inc.peer, vlans: [...inc.vlans] };
+    const prev = s.pvidMemo || {};
+    const vl = v => `VLAN${String(v).padStart(4, '0')}`;
+    if (!silent) {
+      for (const [key, inc] of Object.entries(now)) {
+        const [devId, port] = key.split('|');
+        const d = s.devices[devId];
+        const fresh = inc.vlans.filter(v => !(prev[key]?.vlans || []).includes(v));
+        if (!fresh.length) continue;
+        this.syslog(d, '%SPANTREE-2-RECV_PVID_ERR', `Received BPDU with inconsistent peer vlan id ${inc.peer} on ${longIf(port)} VLAN${inc.local}.`);
+        if (fresh.includes(inc.peer)) this.syslog(d, '%SPANTREE-2-BLOCK_PVID_PEER', `Blocking ${longIf(port)} on ${vl(inc.peer)}. Inconsistent peer vlan.`);
+        if (fresh.includes(inc.local)) this.syslog(d, '%SPANTREE-2-BLOCK_PVID_LOCAL', `Blocking ${longIf(port)} on ${vl(inc.local)}. Inconsistent local vlan.`);
+      }
+      for (const [key, old] of Object.entries(prev)) {
+        const [devId, port] = key.split('|');
+        if (!this.portUp(devId, port)) continue; // link went down: no BPDUs, nothing to report
+        for (const v of old.vlans) if (!(now[key]?.vlans || []).includes(v)) this.syslog(s.devices[devId], '%SPANTREE-2-UNBLOCK_CONSIST_PORT', `Unblocking ${longIf(port)} on ${vl(v)}. Port consistency restored.`);
+      }
+    }
+    s.pvidMemo = now;
   }
 
   /** Log immediately when a new VLAN starts looping (switches notice MAC flapping within seconds). */

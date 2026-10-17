@@ -3,7 +3,7 @@
 import { fmtIp, fmtMask, parseIp, networkOf, broadcastOf, isApipa } from '../engine/ipv4.js';
 import { macWindows } from '../engine/model.js';
 import { hostAddr } from '../engine/routing.js';
-import { dhcpClient, applyDhcpResult, dhcpRelease, resolveName, httpRequest, parseUrl } from '../engine/services.js';
+import { dhcpClient, applyDhcpResult, dhcpRelease, resolveName, httpRequest, parseUrl, leaseTimes } from '../engine/services.js';
 import { wallClock } from '../engine/engine.js';
 
 export function winSession(dev) { return { dev: dev.id, os: 'windows', cwd: 'C:\\Users\\operator', history: [] }; }
@@ -371,15 +371,19 @@ export function winExecute(eng, sess, raw) {
       if (a1 === '/renew') {
         if (!eng.portUp(d.id, d.nic)) return { lines: ['', 'Windows IP Configuration', '', `No operation can be performed on ${adapterName(d)} while it has its media disconnected.`] };
         if (!d.ipcfg.dhcp) return { lines: ['', 'Windows IP Configuration', '', 'The operation failed as no adapter is in the state permissible for', 'this operation.'] };
-        const res = dhcpClient(eng, d, { mode: 'renew' });
+        // With a lease, Windows renews it: a REQUEST unicast to the server that issued it, from the leased address
+        // (broadcast only once past T2). Without one (APIPA, after /release) it runs DORA.
+        const mode = !d.lease ? 'discover' : eng.s.t >= leaseTimes(d.lease).t2 ? 'rebind' : 'renew';
+        const res = dhcpClient(eng, d, { mode });
         applyDhcpResult(eng, d, res);
         eng.mutated(`${d.hostname}: ipconfig /renew`, 'player');
-        eng.event({ type: 'dhcp', host: d.id, ok: res.ok, rogue: !!res.rogue, addr: res.lease?.addr ?? null, via: res.via, server: res.lease?.server ?? null });
+        eng.event({ type: 'dhcp', host: d.id, ok: res.ok, rogue: !!res.rogue, addr: res.lease?.addr ?? null, via: res.via, server: res.lease?.server ?? null, mode: res.mode });
         const L = [];
         if (!res.ok) {
           L.push('', 'Windows IP Configuration', '', `An error occurred while renewing interface ${adapterName(d)} : unable to contact your DHCP server. Request has timed out.`);
           for (const n of res.notes || []) L.push({ t: 'note', text: `trainer: ${n}` });
-          if (!res.notes?.length) L.push({ t: 'note', text: 'trainer: the DHCP broadcast reached no working DHCP server or relay on this segment.' });
+          if (res.keepLease && d.lease) L.push({ t: 'note', text: `trainer: the lease on ${fmtIp(d.lease.addr)} has not expired, so Windows keeps using it. "ipconfig /release" then "ipconfig /renew" starts over with a broadcast DISCOVER.` });
+          else if (!res.notes?.length) L.push({ t: 'note', text: 'trainer: the DHCP broadcast reached no working DHCP server or relay on this segment.' });
           return { lines: L, frames: res.frames };
         }
         L.push(...ipconfig(eng, d, false));

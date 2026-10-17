@@ -13,6 +13,10 @@
 //    point-to-point (full-duplex) link to another Rapid PVST+ switch. Toward a router, a host without PortFast,
 //    a legacy PVST+ switch or a shared (half-duplex) link it falls back to discarding (15 s) -> learning (15 s).
 //    The timed discarding phase reuses the 'listening' state record; show spanning-tree prints it as BLK.
+//  - PVID check (PVST+ and Rapid PVST+): SSTP BPDUs carry the sending VLAN. A native VLAN mismatch on a switch-to-switch
+//    trunk makes the receiving switch put the port in PVID-inconsistent state ("broken", BKN*) for its own native VLAN
+//    and the peer's, so untagged frames do not leak between the two VLANs. A switch with STP disabled for the VLAN sends
+//    no BPDU and checks nothing: then the leak is real.
 
 export const FORWARD_DELAY = 15;
 export const RAPID_DELAY = 1;
@@ -93,10 +97,39 @@ export function portCost(speed) {
 }
 
 /**
- * Compute target STP roles for one VLAN. Returns Map("dev|port" -> { role, edge, rootId }).
- * Roles: root | designated | alternate | backup | nostp
+ * Ports in PVID-inconsistent state. Map("dev|port" -> { local, peer, vlans: [blocked VLAN ids] }).
+ * The neighbour sends its native-VLAN SSTP BPDU untagged with PVID = its native VLAN (if it runs STP there); this
+ * switch classifies the frame into its own native VLAN, and its STP instance there sees the wrong PVID.
  */
-export function computeStpRoles(eng, v) {
+export function pvidInconsistencies(eng) {
+  const st = eng.s;
+  const out = new Map();
+  for (const l of Object.values(st.links)) {
+    if (!eng.linkStatus(l.id).up) continue;
+    const da = st.devices[l.a.dev];
+    const db = st.devices[l.b.dev];
+    if (da.kind !== 'switch' || db.kind !== 'switch') continue;
+    const pa = da.ports[l.a.port];
+    const pb = db.ports[l.b.port];
+    if (pa.mode !== 'trunk' || pb.mode !== 'trunk' || pa.native === pb.native) continue;
+    for (const [x, px, y, py] of [[da, pa, db, pb], [db, pb, da, pa]]) {
+      const nX = px.native;
+      const nY = py.native;
+      if (!carries(y, py, nY) || stpDisabled(y, nY)) continue; // no untagged BPDU from the peer
+      if (!carries(x, px, nX) || stpDisabled(x, nX)) continue; // nothing here checks the PVID
+      const vlans = [nX];
+      if (carries(x, px, nY) && !stpDisabled(x, nY)) vlans.push(nY);
+      out.set(`${x.id}|${px.name}`, { local: nX, peer: nY, vlans });
+    }
+  }
+  return out;
+}
+
+/**
+ * Compute target STP roles for one VLAN. Returns Map("dev|port" -> { role, edge, rootId }).
+ * Roles: root | designated | alternate | backup | nostp. inc: 'PVID' marks a PVID-inconsistent (broken) port.
+ */
+export function computeStpRoles(eng, v, pvid = pvidInconsistencies(eng)) {
   const st = eng.s;
   const roles = new Map();
   const isTransparent = d => d.kind === 'bridge' || (d.kind === 'switch' && knowsVlan(d, v) && stpDisabled(d, v));
@@ -123,12 +156,15 @@ export function computeStpRoles(eng, v) {
   // Segments: arrays of attachments {dev, port, cost}.
   const segments = [];
   const compSeg = {};
+  const broken = [];
   for (const l of upLinks) {
     for (const [me, other] of [[l.a, l.b], [l.b, l.a]]) {
       const d = st.devices[me.dev];
       if (!isSpeaker(d)) continue;
       const p = d.ports[me.port];
       if (!carries(d, p, v)) continue;
+      const inc = pvid.get(`${d.id}|${me.port}`);
+      if (inc && inc.vlans.includes(v)) { broken.push({ dev: d.id, port: me.port, inc }); continue; }
       const od = st.devices[other.dev];
       const op = od.ports[other.port];
       const ls = eng.linkStatus(l.id);
@@ -223,6 +259,12 @@ export function computeStpRoles(eng, v) {
       roles.set(key, { role, edge: !!(seg.edge || seg.atts.length === 1) && a.edgeCfg, rootId: rootOf[a.dev], cost: dist[a.dev] ?? 0, p2p: a.p2p && !seg.comp, peer });
     }
   }
+  // PVID-inconsistent ports take no part in the topology: blocked ("broken") for this VLAN.
+  for (const b of broken) {
+    const l = eng.linkAt(b.dev, b.port);
+    const ls = l ? eng.linkStatus(l.id) : null;
+    roles.set(`${b.dev}|${b.port}`, { role: 'designated', edge: false, inc: 'PVID', rootId: rootOf[b.dev], cost: dist[b.dev] ?? 0, p2p: !!ls && ls.duplexA === 'full' && ls.duplexB === 'full', peer: null });
+  }
   // Transparent switches forward on every carrying port.
   for (const d of Object.values(st.devices)) {
     if (d.kind !== 'switch' || !knowsVlan(d, v) || !stpDisabled(d, v)) continue;
@@ -249,8 +291,10 @@ export function applyStp(eng, converge = false) {
   let changed = false;
   const live = new Set();
   const info = {};
+  const pvid = pvidInconsistencies(eng);
+  eng.pvid = pvid;
   for (const v of allVlans(st)) {
-    const { roles, rootOf, dist } = computeStpRoles(eng, v);
+    const { roles, rootOf, dist } = computeStpRoles(eng, v, pvid);
     info[v] = { rootOf, dist };
     for (const [key, r] of roles) {
       const [devId, port] = key.split('|');
@@ -263,7 +307,17 @@ export function applyStp(eng, converge = false) {
       const cur = byV[port] && byV[port].role === 'nostp' && r.role !== 'nostp' ? null : byV[port];
       const wantFwd = r.role === 'root' || r.role === 'designated' || r.role === 'nostp';
       let next = cur ? { ...cur } : null;
-      if (converge || r.role === 'nostp') {
+      if (r.inc) {
+        next = cur && cur.inc ? { ...cur } : { st: 'blocking', since: now };
+        next.inc = r.inc;
+      } else if (cur && cur.inc) {
+        // Consistency restored: the port starts over from blocking like any port joining the topology.
+        next = converge ? { st: wantFwd ? 'forwarding' : 'blocking', since: now } : null;
+        if (!next) {
+          const fast = rapid && (r.role === 'root' || (r.p2p && r.peer === 'rapid-pvst'));
+          next = r.edge ? { st: 'forwarding', since: now } : !wantFwd ? { st: 'blocking', since: now } : fast ? { st: 'learning', since: now, rapid: true } : { st: 'listening', since: now };
+        }
+      } else if (converge || r.role === 'nostp') {
         next = { st: wantFwd ? 'forwarding' : 'blocking', since: now };
       } else if (!wantFwd) {
         if (!cur || cur.st !== 'blocking') next = { st: 'blocking', since: now };
@@ -282,7 +336,8 @@ export function applyStp(eng, converge = false) {
       next.edge = r.edge;
       next.p2p = r.p2p ?? true;
       next.peer = r.peer ?? null;
-      if (!cur || cur.st !== next.st || cur.role !== next.role) changed = true;
+      if (!r.inc) delete next.inc;
+      if (!cur || cur.st !== next.st || cur.role !== next.role || !!cur.inc !== !!next.inc) changed = true;
       byV[port] = next;
     }
   }
@@ -413,7 +468,7 @@ export function flood(eng, devId, portName, tag, opts = {}) {
       if (last && last.vlan === undefined) last.vlan = v;
       if (!stpForwarding(eng, d, p.name, v)) {
         const rec = stpRecord(eng, d.id, v, p.name);
-        drops.push({ dev: d.id, port: p.name, reason: `STP ${rec ? rec.st : 'blocking'} on VLAN ${v}`, stp: true });
+        drops.push({ dev: d.id, port: p.name, reason: rec?.inc ? `STP broken (${rec.inc} inconsistent) on VLAN ${v}` : `STP ${rec ? rec.st : 'blocking'} on VLAN ${v}`, stp: true });
         continue;
       }
       if (opts.serverMsg && d.snoop.enabled && d.snoop.vlans.includes(v) && !p.snoopTrust) {

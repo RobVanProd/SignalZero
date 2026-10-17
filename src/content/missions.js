@@ -85,8 +85,8 @@ export const MISSIONS = [
     evidence: [{ label: 'Confirm the link from a device console (a show command on ACCESS-SW or EDGE-RTR)', match: ev => isShow(ev) && ['ACCESS-SW', 'EDGE-RTR'].includes(ev.host) }],
     hints: [
       'Everything that needs the router crosses ACCESS-SW Gi0/1. At the switch console: "enable", then "show interfaces status". Which port has no link?',
-      'Gi0/1 is "notconnect". Test the cable from the switch: "test cable-diagnostics tdr interface g0/1", then "show cable-diagnostics tdr interface g0/1". All four pairs "Open" at about 2 m means the break is right at the patch panel, not inside the wall.',
-      'At RACK C, patch "EDGE-RTR Gi0/1 · LAN" to "ACCESS-SW Gi0/1 · uplink". Console ports use the same RJ-45 socket but carry serial management, not Ethernet. Then run "show interfaces status" again.',
+      'Gi0/1 is "notconnect". Test the cable from the switch: "test cable-diagnostics tdr interface g0/1", then "show cable-diagnostics tdr interface g0/1". All four pairs "Open" at about 2 m means the copper ends ~2 m away, at the patch panel: the run inside the rack is fine, nothing continues from the front of the panel.',
+      'The cable is not broken: "Open" on all four pairs at ~2 m is the end of the permanent cable at the patch panel, with nothing plugged into the front — the patch cord is missing. Close the console (Esc), look at the patch panel in RACK C (next to the switch) and press E — or press M → Quick travel → Patch panel. Click P01 "EDGE-RTR Gi0/1 · LAN", then P04 "ACCESS-SW Gi0/1 · uplink". P03 and P06 are console ports: same socket, no Ethernet. Then run "show interfaces status" again on ACCESS-SW.',
     ],
     debrief: {
       failure: 'The router-to-switch patch cord was missing at the patch panel, so every VLAN lost its gateway at once.',
@@ -202,7 +202,7 @@ export const MISSIONS = [
     setup(eng) {
       enableFlows(eng, ['guest', 'isolation']);
       const k = eng.s.devices['GUEST-KIOSK'];
-      const res = dhcpClient(eng, k, { mode: 'renew' });
+      const res = dhcpClient(eng, k, { mode: 'reboot' });
       applyDhcpResult(eng, k, res);
       eng.mutated('guest kiosk reboot', 'incident');
     },
@@ -222,23 +222,24 @@ export const MISSIONS = [
     ],
     hints: [
       'Prove the exposure first. At GUEST-KIOSK: "ipconfig /all" and "curl https://clinic.ops.example/health". Which subnet did the guest get?',
-      'On ACCESS-SW, "show vlan brief": the guest AP port Gi0/6 sits in the clinic VLAN. Move it ("interface g0/6", "switchport access vlan 30") and renew the kiosk. It still reaches the clinic: VLANs split broadcast domains, but EDGE-RTR routes between them.',
-      'On EDGE-RTR, filter inbound on the guest subinterface. Guests still need DNS from 10.42.10.10 (or a public resolver), so permit that first: "ip access-list extended GUEST-IN", "permit udp 10.42.30.0 0.0.0.255 host 10.42.10.10 eq domain", "deny ip 10.42.30.0 0.0.0.255 10.42.0.0 0.0.255.255", "permit ip any any"; then "interface g0/1.30", "ip access-group GUEST-IN in". Test both directions from the kiosk.',
+      'On ACCESS-SW, "show vlan brief": the guest AP port Gi0/6 sits in the clinic VLAN. Move it ("interface g0/6", "switchport access vlan 30"). The kiosk is on Wi-Fi, so it sees no link change and keeps its 10.42.10.x lease; "ipconfig /renew" alone is a unicast to 10.42.10.10 from that old address and times out. Start over on the kiosk: "ipconfig /release", then "ipconfig /renew". It still reaches the clinic: VLANs split broadcast domains, but EDGE-RTR routes between them.',
+      'On EDGE-RTR, filter inbound on the guest subinterface. Permit what guests need from inside first. DHCP: lease renewals are unicast to 10.42.10.10, and an inbound ACL also filters the broadcasts the relay forwards. DNS: 10.42.10.10 (or a public resolver). "ip access-list extended GUEST-IN", "permit udp any any eq bootps", "permit udp 10.42.30.0 0.0.0.255 host 10.42.10.10 eq domain", "deny ip 10.42.30.0 0.0.0.255 10.42.0.0 0.0.255.255", "permit ip any any"; then "interface g0/1.30", "ip access-group GUEST-IN in". Test both directions from the kiosk.',
     ],
     debrief: {
       failure: 'The guest AP was patched into the clinic VLAN, so guests were on the clinic subnet with direct Layer 2 access.',
       evidence: 'Kiosk had a 10.42.10.x lease and curl to the clinic returned 200; "show vlan brief" listed Gi0/6 in VLAN 10.',
-      fix: 'Move the AP port to the guest VLAN (separate broadcast domain/subnet), then filter routed traffic from guests to internal ranges with an inbound ACL, while explicitly permitting what guests need (DNS) and leaving internet access open.',
+      fix: 'Move the AP port to the guest VLAN (separate broadcast domain/subnet), make the kiosk start over (release, renew), then filter routed traffic from guests to internal ranges with an inbound ACL, while explicitly permitting what guests need (DHCP, DNS) and leaving internet access open.',
       why: 'Segmentation needs both: a VLAN alone still lets the router forward between subnets; an ACL alone cannot filter traffic that never reaches the router. ACLs are processed top-down, first match wins, and every ACL ends with an implicit deny.',
-      real: ['Cisco: show vlan brief · switchport access vlan · ip access-list extended · ip access-group in · show access-lists (watch the match counters)', 'Design: give guests a public resolver or a DNS-only permit; deny RFC 1918 destinations; apply as close to the source as possible.'],
-      pitfalls: ['Forgetting DNS: the guest "has no internet" because names stop resolving.', 'Forgetting "permit ip any any": the implicit deny blocks the internet too.', 'Changing the VLAN but not renewing: the client keeps its old-subnet lease until it renews.'],
+      real: ['Cisco: show vlan brief · switchport access vlan · ip access-list extended · ip access-group in · show access-lists (watch the match counters)', 'Design: give guests a public resolver or a DNS-only permit; permit DHCP (udp eq bootps) near the top of any inbound ACL on an interface with DHCP clients; deny RFC 1918 destinations; apply as close to the source as possible.', 'DHCP client states (RFC 2131): at T1 (half the lease) a client renews by unicast to its server; at T2 (7/8) it broadcasts (rebinding); a link change or reboot makes it ask for its old address again (INIT-REBOOT), which the server NAKs on the wrong network.'],
+      pitfalls: ['Forgetting DNS: the guest "has no internet" because names stop resolving.', 'Forgetting "permit ip any any": the implicit deny blocks the internet too.', 'Moving the VLAN and expecting the client to notice: a Wi-Fi client behind the AP sees no link change and keeps its old lease, and "ipconfig /renew" (a unicast from the old address) times out. Release and renew, or wait for the lease to run out.', 'An inbound ACL that denies guests -> internal also drops their unicast DHCP renewals: permit bootps first.'],
     },
     reference(eng) {
       const run = cli(eng);
       run('ACCESS-SW', 'enable', 'configure terminal', 'interface g0/6', `switchport access vlan ${V(eng, 'guest')}`, 'end');
-      run('GUEST-KIOSK', 'ipconfig /renew');
+      run('GUEST-KIOSK', 'ipconfig /release', 'ipconfig /renew');
       const g = `10.${eng.s.params.site}.${eng.s.params.octets.guest}.0`;
       run('EDGE-RTR', 'enable', 'configure terminal', 'ip access-list extended GUEST-IN',
+        'permit udp any any eq bootps',
         `permit udp ${g} 0.0.0.255 host ${net(eng.s.params, 'clinic', 10)} eq domain`,
         `deny ip ${g} 0.0.0.255 10.${eng.s.params.site}.0.0 0.0.255.255`,
         'permit ip any any', 'exit', `interface g0/1.${V(eng, 'guest')}`, 'ip access-group GUEST-IN in', 'end');
@@ -386,15 +387,15 @@ export const MISSIONS = [
     hints: [
       'Only some cameras stream. On CORE-SRV: "journalctl -u isc-dhcp-server | grep -i free". What does "no free leases" say about the scope?',
       'The camera scope is a /27: 30 usable addresses, and the pool (.10–.30) is only 21. Fifty cameras need at least a /26 (62 usable). 10.42.40.64/27 (.64–.95) already belongs to the door controllers (EDGE-RTR Gi0/1.41). A /26 starts on a multiple of 64: 10.42.40.0/26 (.0–.63) and 10.42.40.128/26 (.128–.191) are both free, but 10.42.40.64/26 or 10.42.40.0/25 would contain the door block. Pick a free block.',
-      'Example: 10.42.40.128/26. EDGE-RTR: "interface g0/1.40", "ip address 10.42.40.129 255.255.255.192". dhcpd.conf: "subnet 10.42.40.128 netmask 255.255.255.192", "range 10.42.40.140 10.42.40.190;", "option routers 10.42.40.129;". Restart the service. Cameras renew at T1 (5 min) — or bounce their PoE port (DIST-SW-B: "interface g0/4", "shutdown", "no shutdown").',
+      'Example: 10.42.40.128/26. EDGE-RTR: "interface g0/1.40", "ip address 10.42.40.129 255.255.255.192". dhcpd.conf: "subnet 10.42.40.128 netmask 255.255.255.192", "range 10.42.40.140 10.42.40.190;", "option routers 10.42.40.129;". Restart the service. Cameras without a lease pick up the new scope on their next try. Cameras that have one keep their old address: their renewal at T1 (5 min) is a unicast through their old gateway 10.42.40.1, which no longer exists, so it fails; only at T2 (87.5% of the 10-minute lease) do they broadcast, and the server NAKs the old address ("wrong network"). Do not wait: bounce their PoE port (DIST-SW-B: "interface g0/4", "shutdown", "no shutdown"). On link-up every camera asks for its old address again, gets an immediate NAK and starts over.',
     ],
     debrief: {
       failure: 'The camera subnet was a /27 with a 21-address pool: the scope ran out after 21 cameras ("no free leases").',
       evidence: 'Feed count stuck at 21/50; dhcpd journal "network 10.42.40.0/27: no free leases"; IPAM shows 10.42.40.64/27 in use by VLAN 41.',
-      fix: 'Re-address the camera VLAN to a non-overlapping block of at least /26, update the gateway and the scope together, and make clients re-acquire.',
+      fix: 'Re-address the camera VLAN to a non-overlapping block of at least /26, update the gateway and the scope together, and make clients re-acquire (a link bounce makes them re-request at once).',
       why: 'Usable hosts = 2^(32−prefix) − 2. /27 → 30, /26 → 62, /25 → 126. Subnets must not overlap, and the DHCP scope, the router interface and the clients\' gateway must agree.',
-      real: ['Cisco IOS refuses overlapping interface subnets ("% ... overlaps with ...").', 'ISC DHCP: subnet/netmask must match the relay\'s interface subnet (giaddr) and range must sit inside it.', 'Update IPAM/documentation as part of the change.'],
-      pitfalls: ['Changing the scope but not the router interface (clients get a gateway that does not exist).', 'Forgetting existing leases: clients keep old addresses until they renew.', 'Choosing a /25 that swallows the door-controller /27.'],
+      real: ['Cisco IOS refuses overlapping interface subnets ("% ... overlaps with ...").', 'ISC DHCP: subnet/netmask must match the relay\'s interface subnet (giaddr) and range must sit inside it. With "authoritative;" dhcpd NAKs a request for an address on the wrong network ("DHCPREQUEST for ... : wrong network."); without it, it stays silent ("ignored (not authoritative)") and clients only recover when their lease expires.', 'Renumbering in production: shorten the lease time well before the change, so clients come back quickly.', 'Update IPAM/documentation as part of the change.'],
+      pitfalls: ['Changing the scope but not the router interface (clients get a gateway that does not exist).', 'Forgetting existing leases: clients keep their old addresses until the lease runs out or they re-request. Their unicast renewal through a gateway that no longer exists fails, so recovery waits for T2 rebinding unless you bounce the link.', 'Choosing a /25 that swallows the door-controller /27.'],
     },
     reference(eng) {
       const p = eng.s.params;
@@ -468,7 +469,7 @@ export const MISSIONS = [
       eng.reindex();
       eng.mutated('unknown device connected at lobby jack L-09', 'incident');
       const k = s.devices['GUEST-KIOSK'];
-      const res = dhcpClient(eng, k, { mode: 'discover', current: null });
+      const res = dhcpClient(eng, k, { mode: 'reboot' });
       applyDhcpResult(eng, k, res);
       eng.mutated('guest kiosk reboot', 'incident');
     },
@@ -496,7 +497,7 @@ export const MISSIONS = [
         eng.reindex();
         eng.mutated('rogue device moved to lobby jack L-10', 'incident');
         const k = s.devices['GUEST-KIOSK'];
-        const res = dhcpClient(eng, k, { mode: 'discover', current: null });
+        const res = dhcpClient(eng, k, { mode: 'reboot' });
         applyDhcpResult(eng, k, res);
         eng.mutated('guest kiosk reboot', 'incident');
         return 'rogue2';
