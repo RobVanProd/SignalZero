@@ -765,7 +765,7 @@ export function asksAaaa(eng, client, r4) {
   if (!hostV6Enabled(client)) return false;
   if (client.os === 'windows') {
     if (!hostAddr6(eng, client).addrs.some(x => isGlobal6(x.addr))) return false;
-    if (r4 && !r4.ok && r4.rcode !== 'NOERROR') return false;
+    if (r4 && !r4.ok && r4.rcode !== 'NOERROR' && r4.rcode !== 'NXDOMAIN') return false; // timed out or failed
     return true;
   }
   return true;

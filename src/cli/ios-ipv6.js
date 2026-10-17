@@ -14,12 +14,14 @@ const PORT_NUM = { www: 80, http: 80, https: 443, domain: 53, bootps: 67, bootpc
 const U = fmtIp6Ios;
 
 export function addIpv6Grammar(g) {
-  g.kwHelp({
+  // "?" help is one string per keyword in this parser: add IPv6 keywords without changing existing IPv4 help.
+  const help = {
     ipv6: 'IPv6 configuration commands', 'unicast-routing': 'Enable unicast routing', 'eui-64': 'Use eui-64 interface identifier', 'link-local': 'Use link-local address',
     nd: 'IPv6 interface Neighbor Discovery subcommands', ra: 'Router Advertisement control', suppress: 'Suppress IPv6 Router Advertisements', all: 'Suppress all IPv6 RA',
-    'traffic-filter': 'Access control list for packets', 'access-list': 'Configure access lists', neighbors: 'Show IPv6 neighbor cache entries', sequence: 'Sequence number for this entry',
-    local: 'Local routes', connected: 'Connected', static: 'Static routes',
-  });
+    'traffic-filter': 'Access control list for packets', sequence: 'Sequence number for this entry', cef: 'Cisco Express Forwarding for IPv6',
+    local: 'Local routes', connected: 'Connected', static: 'Static routes', dns: 'Set DNS server for RA', protocols: 'IPv6 Routing Protocols', traffic: 'IPv6 traffic statistics',
+  };
+  for (const [k, v] of Object.entries(help)) if (!(k in g.help)) g.help[k] = v;
   const ex = ['user', 'exec'];
   g.add(ex, 'show ipv6 interface brief', 'v6-sh-ib');
   g.add(ex, 'show ipv6 interface', 'v6-sh-int');

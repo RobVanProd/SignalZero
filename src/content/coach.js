@@ -286,7 +286,7 @@ COACH.M11 = [
   },
   {
     id: 'routing', title: 'Turn on IPv6 routing', where: 'EDGE-RTR', cmd: { dev: 'EDGE-RTR', text: 'ipv6 unicast-routing' },
-    how: 'Type configure terminal, then ipv6 unicast-routing.',
+    how: 'Type configure terminal (after enable, if the prompt still ends in ">"), then ipv6 unicast-routing.',
     done: c => !!r6(c).ipv6Routing,
     learned: 'EDGE-RTR now forwards IPv6 and will send RAs on every LAN interface that has IPv6. Without this command an IOS router is an IPv6 host: it can hold addresses and answer pings, but it advertises and forwards nothing.',
   },
