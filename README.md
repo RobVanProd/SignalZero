@@ -6,6 +6,12 @@ A first-person network operations game. You are the only engineer on site at 02:
 
 ## Play
 
+**[Play SIGNAL//ZERO live](https://robvanprod.github.io/SignalZero/)** — no download or installation required.
+
+GitHub Pages automatically builds and deploys the latest source when changes are pushed to the default branch (`ccr-4b891939-1lgafn`). The deployment can also be started manually from the repository's **Actions → Deploy game to GitHub Pages** workflow.
+
+To build and play offline:
+
 ```bash
 npm install
 npm run build           # -> dist/signal-zero.html (single file, works offline)
