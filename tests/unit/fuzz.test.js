@@ -44,11 +44,12 @@ const LNX = [
   'dig @10.42.10.10 portal.example.net', 'nslookup clinic.ops.example', 'ping -c 2 10.42.10.1', 'traceroute 203.0.113.20',
   'curl https://clinic.ops.example/health', 'cat /etc/netplan/01-netcfg.yaml', 'netplan apply', 'help', 'ls', 'pwd', 'sudo -i',
   'nano /etc/dhcp/dhcpd.conf', 'cat /etc/bind/db.ops.example | grep clinic',
+  'ip neigh', 'ip route get 10.42.10.1', 'ip route add default via 10.42.10.1', 'ip route replace default via 10.42.10.254', 'ip route del default', 'ip neigh flush all', 'tcpdump -n', 'arp -a',
 ];
 const READ_ONLY = {
   ios: c => /^(show|sh |enable|disable|ping|traceroute|\?|do show)/.test(c) && !/test cable/.test(c),
   windows: c => /^(ipconfig( \/all| \/displaydns)?$|ping|tracert|pathping|nslookup|curl|arp|route print|help|hostname|whoami)/.test(c),
-  linux: c => /^(systemctl status|journalctl|cat|dhcpd -t|named-checkzone|dhcp-lease-list|ip |ss |dig|nslookup|ping|traceroute|curl|help|ls|pwd)/.test(c),
+  linux: c => /^(systemctl status|journalctl|cat|dhcpd -t|named-checkzone|dhcp-lease-list|ip |ss |dig|nslookup|ping|traceroute|curl|help|ls|pwd)/.test(c) && !/^ip .*\b(add|del|replace|flush)\b/.test(c),
 };
 const JUNK = ['%', '$(rm -rf /)', '\u0000', '999.1.1.1', '-', '""', '|', '| include', '10.42.10.', 'g0/99', 'gi9/9/9', '4096', '-1', 'ÿ', '\t', '   '];
 

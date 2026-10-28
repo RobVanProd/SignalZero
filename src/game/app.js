@@ -18,11 +18,14 @@ import { TerminalWindow } from '../ui/terminal.js';
 import { PatchWindow } from '../ui/patch.js';
 import { MapWindow } from '../ui/mapview.js';
 import { openEditor } from '../ui/editor.js';
+import { BenchScreen } from '../ui/bench.js';
+import { LESSONS, lessonById } from '../content/lessons.js';
 import * as S from '../ui/screens.js';
 import { h } from '../ui/dom.js';
 
 const SAVE_KEY = 'signalzero.save.v3';
 const SETTINGS_KEY = 'signalzero.settings.v1';
+const LESSON_KEY = 'signalzero.lessons.v1';
 
 function load(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
@@ -64,6 +67,8 @@ export class App {
     requestAnimationFrame(t => this.loop(t));
     this.showTitle();
     window.__SZ__ = this.testApi();
+    // facilitator link for playtests: ?lesson=L01[&start=transfer&fault=no-return|gateway-is-host]
+    if (params.get('lesson')) this.openLesson(params.get('lesson'), { restart: true, startAt: params.get('start'), transferFault: params.get('fault') });
   }
 
   // ---------------------------------------------------------------- settings / persistence
@@ -97,7 +102,7 @@ export class App {
   saveProgress() { store(PROGRESS_KEY, this.progress); store(TELEMETRY_KEY, this.telemetry.data); }
 
   resetAll() {
-    for (const k of [SAVE_KEY, PROGRESS_KEY, TELEMETRY_KEY]) { try { localStorage.removeItem(k); } catch { /* ignore */ } }
+    for (const k of [SAVE_KEY, PROGRESS_KEY, TELEMETRY_KEY, LESSON_KEY]) { try { localStorage.removeItem(k); } catch { /* ignore */ } }
     location.reload();
   }
 
@@ -470,6 +475,51 @@ export class App {
   openSettings() { this.prepMenu(); S.settingsCard(this); }
   openAbout() { this.prepMenu(); S.about(this); }
   openMissionSelect() { this.hideTitle(); S.missionSelect(this); }
+
+  // ---------------------------------------------------------------- apprenticeship (2D bench, no 3D play)
+  lessonSaves() { return load(LESSON_KEY, {}); }
+
+  lessonLabel(id) {
+    const sv = this.lessonSaves()[id];
+    const L = lessonById(id);
+    if (!sv || !L) return null;
+    if (sv.i >= L.steps.length) return 'completed · play again';
+    return `continue: step ${sv.i + 1} of ${L.steps.length}`;
+  }
+
+  openLesson(id = LESSONS[0].id, { restart = false, startAt = null, transferFault = null } = {}) {
+    const L = lessonById(id);
+    if (!L) return;
+    const saved = this.lessonSaves()[id];
+    const resume = !restart && saved && saved.i < L.steps.length ? saved : null;
+    this.hideTitle();
+    this.mode = 'lesson';
+    this.hud.show(false);
+    this.world.controls.enabled = false;
+    document.exitPointerLock?.();
+    this.telemetry.log('lesson-open', { lesson: id, resume: !!resume });
+    this.bench = new BenchScreen(this, L, { resume, startAt, transferFault });
+  }
+
+  saveLesson(id, st) {
+    const all = this.lessonSaves();
+    const { snapshot, ...rest } = st;
+    all[id] = { ...rest, snapshot };
+    if (!store(LESSON_KEY, all)) { delete all[id].snapshot; store(LESSON_KEY, all); }
+    this.saveProgress();
+  }
+
+  recordLesson(id, summary) {
+    this.progress.lessons ||= {};
+    if (!this.progress.lessons[id]) this.telemetry.log('lesson-complete', { lesson: id, ...summary });
+    this.progress.lessons[id] = { completedAt: Date.now(), ...summary };
+    this.saveProgress();
+  }
+
+  leaveLesson() {
+    this.bench = null;
+    this.showTitle();
+  }
   openChallengeSetup() { this.hideTitle(); S.challengeSetup(this); }
 
   prepMenu() {
@@ -499,11 +549,12 @@ export class App {
     const dom = this.world.ctx.renderer.domElement;
     dom.addEventListener('click', () => {
       this.sound.ensure();
-      if (this.mode !== 'title' && !this.overlayKind && !this.touch && document.pointerLockElement !== dom) dom.requestPointerLock?.();
+      if (this.mode !== 'title' && this.mode !== 'lesson' && !this.overlayKind && !this.touch && document.pointerLockElement !== dom) dom.requestPointerLock?.();
       else if (document.pointerLockElement === dom) this.interact();
     });
     addEventListener('keydown', e => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (this.mode === 'lesson') return; // the bench screen handles its own keys
       this.sound.ensure();
       // modal cards (briefing, debrief, pause…) are plain .overlay elements without an overlayKind
       const modal = !!document.querySelector('#ui > .overlay');
@@ -561,7 +612,7 @@ export class App {
   loop(now) {
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
-    const playing = this.mode !== 'title';
+    const playing = this.mode !== 'title' && this.mode !== 'lesson';
     if (playing) {
       const simDt = dt * (this.warp ? 8 : 1);
       this.eng.advance(simDt);
@@ -628,6 +679,8 @@ export class App {
       open: id => app.openStation(STATIONS.find(s => s.id === id)),
       status: () => ({ mode: app.mode, mission: app.campaign?.mission?.id, phase: app.campaign?.st.phase, eval: app.lastEval?.status, results: app.campaign?.st.results.length }),
       places: PLACES,
+      lesson: () => app.bench?.run || null,
+      bench: () => app.bench || null,
     };
   }
 }

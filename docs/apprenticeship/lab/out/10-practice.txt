@@ -1,0 +1,23 @@
+pcb$ ip route
+10.20.30.64/26 dev eth0 proto kernel scope link src 10.20.30.100 
+[exit 0]
+pcb$ ip route add default via 10.20.30.1
+Error: Nexthop has invalid gateway.
+[exit 2]
+pcb$ ip route add default via 10.20.31.1
+Error: Nexthop has invalid gateway.
+[exit 2]
+pcb$ ip route add default via 10.20.30.126
+[exit 0]
+pcb$ ping -c 2 10.20.31.25
+PING 10.20.31.25 (10.20.31.25) 56(84) bytes of data.
+64 bytes from 10.20.31.25: icmp_seq=1 ttl=63 time=0.253 ms
+64 bytes from 10.20.31.25: icmp_seq=2 ttl=63 time=0.060 ms
+
+--- 10.20.31.25 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1007ms
+rtt min/avg/max/mdev = 0.060/0.156/0.253/0.096 ms
+[exit 0]
+pcb$ ip neigh
+10.20.30.126 dev eth0 lladdr 02:00:00:00:0a:01 REACHABLE 
+[exit 0]

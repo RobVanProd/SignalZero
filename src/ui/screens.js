@@ -4,6 +4,7 @@ import { h, clear, overlay, fmtDuration } from './dom.js';
 import { MISSIONS, ACTS } from '../content/missions.js';
 import { OBJECTIVES, DOMAINS } from '../content/objectives.js';
 import { level, recommend, TRANSFER_LABS } from '../game/progress.js';
+import { LESSONS } from '../content/lessons.js';
 
 const objTitle = id => OBJECTIVES.find(o => o.id === id)?.title || '';
 
@@ -16,8 +17,9 @@ export function titleScreen(app) {
       h('div', { class: 'tagline' }, 'Night shift · District 04'),
       h('p', { class: 'lede' }, 'Half the district is dark and you are the only engineer on site. Walk the operations centre, open real-style device consoles, find the fault from evidence, fix it, and prove it works. The city outside the window lights up only when the services actually do.'),
       h('div', { class: 'menu' },
+        h('button', { class: `btn ${hasSave ? '' : 'primary'} apprentice`, onclick: () => app.openLesson('L01') }, 'Apprenticeship · Lesson 1: Next hop', h('small', {}, app.lessonLabel('L01') || 'start here · learn it working before you fix it broken')),
         hasSave ? h('button', { class: 'btn primary', onclick: () => app.continueCampaign() }, 'Continue night shift', h('small', {}, app.saveLabel())) : null,
-        h('button', { class: `btn ${hasSave ? '' : 'primary'}`, onclick: () => app.newCampaign() }, hasSave ? 'New campaign' : 'Begin night shift', h('small', {}, '10 incidents')),
+        h('button', { class: 'btn', onclick: () => app.newCampaign() }, hasSave ? 'New campaign' : 'Begin night shift', h('small', {}, '10 incidents')),
         h('button', { class: 'btn', onclick: () => app.openMissionSelect() }, 'Incident replay', h('small', {}, 'any solved incident')),
         h('button', { class: 'btn', onclick: () => app.openChallengeSetup() }, 'Night Shift challenge', h('small', {}, 'randomised · unguided')),
         h('button', { class: 'btn', onclick: () => app.openSkills() }, 'Skill evidence', h('small', {}, 'N10-009 map')),
@@ -36,6 +38,7 @@ export function briefing(app, m, onGo) {
       h('p', { class: 'brief' }, m.brief),
       h('h4', {}, 'Your task'), h('p', {}, m.task),
       h('h4', {}, 'How you win'), h('ul', { class: 'clean' }, m.goals.map(g => h('li', {}, g.label)), (m.constraints || []).map(c => h('li', { class: 'muted' }, `Without breaking: ${c.label}`))),
+      LESSONS.some(L => L.prepares.includes(m.id) && !app.progress.lessons?.[L.id]) ? h('div', { class: 'hintbox' }, h('b', {}, 'NEW TO THIS? '), `This incident assumes what ${LESSONS.filter(L => L.prepares.includes(m.id)).map(L => `Apprenticeship ${L.code.split('· ')[1].toLowerCase()} ("${L.title}")`).join(', ')} teaches on a working network first. You can play the incident anyway; the lesson is on the title screen.`) : null,
       app.coach.steps && app.settings.coach !== false ? h('div', { class: 'hintbox coachbrief' }, h('b', {}, 'COACH IS ON. '), `This incident is broken into ${app.coach.steps.length} small steps. The NEXT STEP card (top left) says what to do and where; an orange marker points at the place; each step is explained when you finish it. You can turn the coach off in Settings.`) : null,
       h('p', { class: 'muted', style: { fontSize: '12.5px' } }, 'The simulator checks real behaviour (does traffic actually flow?), not a specific command. Any correct fix works. After the fix you must verify it from where users are.'),
       h('div', { class: 'tags' }, m.objectives.map(o => h('span', { class: 'tag', title: objTitle(o) }, h('b', {}, o), ' ', objTitle(o).split(' (')[0])))),

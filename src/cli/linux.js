@@ -9,10 +9,11 @@ import { wallClock } from '../engine/engine.js';
 import { parseNetplan, renderNetplan } from '../engine/parsers/netplan.js';
 // ---- ipv6
 import { fmtIp6, parseIp6, fmtAddr, isLinkLocal6 } from '../engine/ipv6.js';
-import { hostAddr6 } from '../engine/net6.js';
+import { hostAddr6, hostV6Enabled } from '../engine/net6.js';
 import { lookupHost, resolveName6 } from '../engine/services.js';
 import { linuxInet6Lines, linuxRoute6, linuxNeigh6, LO_INET6 } from './host6.js';
 import { sshConnect, parseOpenSsh, OPENSSH_USAGE } from './ssh.js'; // ---- ospf (Act II)
+import { ipRoute, ipNeigh } from './iproute.js';
 
 const UNITS = {
   'isc-dhcp-server': { svc: 'isc-dhcp-server', desc: 'ISC DHCP IPv4 server', docs: 'man:dhcpd(8)', proc: 'dhcpd' },
@@ -162,8 +163,9 @@ function famArgs(args, cmd) {
 function pingLinux(eng, d, args0, cmd = 'ping') {
   const { fam, rest: args } = famArgs(args0, cmd);
   let count = 4;
+  let counted = false;
   const rest = [];
-  for (let i = 0; i < args.length; i++) { if (args[i] === '-c') { count = Math.max(1, Math.min(20, Number(args[++i]) || 4)); continue; } rest.push(args[i]); }
+  for (let i = 0; i < args.length; i++) { if (args[i] === '-c') { count = Math.max(1, Math.min(20, Number(args[++i]) || 4)); counted = true; continue; } rest.push(args[i]); }
   const target = rest[0];
   if (!target) return ['ping: usage error: Destination address required'];
   const lit = parseIp(target);
@@ -178,7 +180,7 @@ function pingLinux(eng, d, args0, cmd = 'ping') {
   for (let i = 1; i <= count; i++) {
     const r = eng.probe({ from: d.id, dst: ip, proto: 'icmp', record: true });
     if (r.status === 'local-error') {
-      if (r.reason === 'no-route') return [`ping: connect: Network is unreachable`];
+      if (r.reason === 'no-route') { eng.event({ type: 'ping', host: d.id, target, ip, ok: false, error: 'no-route', sent: 0 }); return [`ping: connect: Network is unreachable`]; }
       if (r.reason === 'arp-fail') { L.push(`From ${fmtIp(hostAddr(eng, d).addr)} icmp_seq=${i} Destination Host Unreachable`); errs++; continue; }
       return ['ping: connect: Network is unreachable'];
     }
@@ -190,12 +192,17 @@ function pingLinux(eng, d, args0, cmd = 'ping') {
     ok++;
     L.push(`64 bytes from ${fmtIp(r.responderIp)}: icmp_seq=${i} ttl=${r.ttl} time=${ms.toFixed(ms < 10 ? 3 : 1)} ms`);
   }
-  L.push('', `--- ${target} ping statistics ---`, `${count} packets transmitted, ${ok} received,${errs ? ` +${errs} errors,` : ''} ${Math.round(((count - ok) / count) * 100)}% packet loss, time ${(count - 1) * 1001}ms`);
+  // Without -c, Linux ping runs until Ctrl+C; the terminal shows ^C and ping prints its summary.
+  L.push(counted ? '' : '^C', `--- ${target} ping statistics ---`, `${count} packets transmitted, ${ok} received,${errs ? ` +${errs} errors,` : ''} ${Math.round(((count - ok) / count) * 100)}% packet loss, time ${(count - 1) * 1001}ms`);
   if (rtts.length) {
     const avg = rtts.reduce((a, b) => a + b, 0) / rtts.length;
     L.push(`rtt min/avg/max/mdev = ${Math.min(...rtts).toFixed(3)}/${avg.toFixed(3)}/${Math.max(...rtts).toFixed(3)}/${(Math.max(...rtts) - Math.min(...rtts)).toFixed(3)} ms`);
-  }
-  eng.event({ type: 'ping', host: d.id, target, ip, ok: ok > 0 });
+  } else if (errs > 1 && errs === count) {
+    // echoes queue while ARP for the next hop is tried (3 requests, 1 s apart): up to 4 were in flight at once
+    L.push(`pipe ${Math.min(errs, 4)}`);
+  } else L.push('');
+  if (!counted) L.push({ t: 'note', sim: true, text: 'simulator: Linux ping keeps sending until you press Ctrl+C. The simulator stopped it after 4 echoes, as if you had. Use -c N to choose the count.' });
+  eng.event({ type: 'ping', host: d.id, target, ip, ok: ok > 0, sent: count, received: ok, errors: errs });
   return L;
 }
 
@@ -374,22 +381,27 @@ function ipCmd(eng, d, args0) {
     if ('neighbour'.startsWith(sub) || 'neighbor'.startsWith(sub)) return linuxNeigh6(eng, d);
     return [`Object "${args[0]}" is unknown, try "ip help".`];
   }
+  if (('address'.startsWith(sub) || sub === 'a') && args[1] && !['show', 'list', 'ls'].includes(args[1])) return [{ t: 'note', sim: true, text: `simulator: "ip address ${args.slice(1).join(' ')}" is a real iproute2 command that this simulator does not support. Addresses here are changed through netplan (or DHCP).` }];
   if ('address'.startsWith(sub) || sub === 'a') {
-    const L = ['1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000', '    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00', '    inet 127.0.0.1/8 scope host lo', '       valid_lft forever preferred_lft forever'];
-    if (fam !== 4) L.push(...LO_INET6);
-    L.push(`2: ${d.nic}: <BROADCAST,MULTICAST,UP${up ? ',LOWER_UP' : ''}> mtu 1500 qdisc mq state ${up ? 'UP' : 'DOWN'} group default qlen 1000`, `    link/ether ${mac} brd ff:ff:ff:ff:ff:ff`);
+    // "ip -4 addr" prints no link/… lines and no inet6 lines (iproute2 6.1, lab file 01-same-subnet.txt)
+    const v6 = fam !== 4 && hostV6Enabled(d);
+    const devAt = args.indexOf('dev');
+    const only = devAt >= 0 ? args[devAt + 1] : null;
+    if (only && only !== 'lo' && only !== d.nic) return [`Device "${only}" does not exist.`];
+    const L = ['1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000'];
+    if (fam !== 4) L.push('    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00');
+    L.push('    inet 127.0.0.1/8 scope host lo', '       valid_lft forever preferred_lft forever');
+    if (v6) L.push(...LO_INET6);
+    L.push(`2: ${d.nic}: <BROADCAST,MULTICAST,UP${up ? ',LOWER_UP' : ''}> mtu 1500 qdisc mq state ${up ? 'UP' : 'DOWN'} group default qlen 1000`);
+    if (fam !== 4) L.push(`    link/ether ${mac} brd ff:ff:ff:ff:ff:ff`);
     if (a.addr !== null) L.push(`    inet ${fmtIp(a.addr)}/${a.len} brd ${fmtIp(broadcastOf(a.addr, a.len))} scope global ${a.source === 'dhcp' ? 'dynamic ' : ''}${d.nic}`, '       valid_lft forever preferred_lft forever');
-    if (fam !== 4) L.push(...linuxInet6Lines(eng, d));
+    if (v6) L.push(...linuxInet6Lines(eng, d));
+    if (only) { const k = L.findIndex(l => /^2: /.test(l)); return only === 'lo' ? L.slice(0, k) : L.slice(k); }
     return L;
   }
-  if (('neighbour'.startsWith(sub) || 'neighbor'.startsWith(sub)) && sub.length >= 1 && sub[0] === 'n') return linuxNeigh6(eng, d);
-  if ('route'.startsWith(sub)) {
-    if (a.addr === null || !up) return [];
-    const L = [];
-    if (a.gw !== null && a.gw !== undefined) L.push(`default via ${fmtIp(a.gw)} dev ${d.nic} proto static`);
-    L.push(`${fmtIp(networkOf(a.addr, a.len))}/${a.len} dev ${d.nic} proto kernel scope link src ${fmtIp(a.addr)}`);
-    return L;
-  }
+  if (('neighbour'.startsWith(sub) || 'neighbor'.startsWith(sub)) && sub.length >= 1 && sub[0] === 'n') return ipNeigh(eng, d, args.slice(1), fam === 4 ? [] : linuxNeigh6(eng, d));
+  if ('route'.startsWith(sub)) return ipRoute(eng, d, args.slice(1));
+  if ('link'.startsWith(sub) && args[1] && !['show', 'list', 'ls'].includes(args[1])) return [{ t: 'note', sim: true, text: `simulator: "ip link ${args.slice(1).join(' ')}" is a real iproute2 command that this simulator does not support.` }];
   if ('link'.startsWith(sub)) return [`2: ${d.nic}: <BROADCAST,MULTICAST,UP${up ? ',LOWER_UP' : ''}> mtu 1500 qdisc mq state ${up ? 'UP' : 'DOWN'} mode DEFAULT group default qlen 1000`, `    link/ether ${mac} brd ff:ff:ff:ff:ff:ff`];
   return [`Object "${args[0]}" is unknown, try "ip help".`];
 }
@@ -594,7 +606,10 @@ export function linuxExecute(eng, sess, raw) {
       return { lines: [], editor: { dev: d.id, path, text: t ?? '', isNew: t === undefined } };
     }
     case 'ip': return out(ipCmd(eng, d, args));
-    case 'ifconfig': return out(['Command \'ifconfig\' not found, but can be installed with:', 'apt install net-tools', { t: 'note', text: 'trainer: modern Linux uses "ip a" (iproute2).' }]);
+    // Ubuntu 24.04's command-not-found handler (text captured in docs/apprenticeship/lab/out/09-command-not-found.txt)
+    case 'ifconfig': case 'arp': case 'route': case 'netstat': return out([`Command '${cmd}' not found, but can be installed with:`, 'apt install net-tools', { t: 'note', text: `trainer: net-tools is not installed on current Ubuntu. Use iproute2 instead: ${{ ifconfig: '"ip a"', arp: '"ip neigh" (the ARP table)', route: '"ip route"', netstat: '"ss -tulpn"' }[cmd]}.` }]);
+    case 'nmap': return out(["Command 'nmap' not found, but can be installed with:", 'apt install nmap']);
+    case 'ipconfig': return out(["Command 'ipconfig' not found, did you mean:", "  command 'iconfig' from deb ipmiutil (3.1.9-3)", "  command 'hipconfig' from deb hipcc (5.2.3-12)", "  command 'iwconfig' from deb wireless-tools (30~pre9-13.1ubuntu4)", "  command 'ifconfig' from deb net-tools (2.10-0.1ubuntu4.4)", 'Try: apt install <deb name>', { t: 'note', text: 'trainer: ipconfig is Windows. On Linux: "ip a" for addresses, "ip route" for routes and the default gateway.' }]);
     case 'ping': case 'ping6': return out(pingLinux(eng, d, args, cmd));
     case 'traceroute': case 'tracepath': case 'traceroute6': return out(traceLinux(eng, d, args, cmd));
     case 'dig': return out(digCmd(eng, d, args));
@@ -706,9 +721,14 @@ export function linuxExecute(eng, sess, raw) {
       eng.event({ type: 'netplan', host: d.id, ok: true });
       return out(args[0] === 'try' ? ['Do you want to keep these settings?', '', 'Press ENTER before the timeout to accept the new configuration', '', 'Configuration accepted.'] : []);
     }
-    default: return out([`${cmd}: command not found`]);
+    default:
+      if (LINUX_REAL.has(cmd)) return out([{ t: 'note', sim: true, text: `simulator: "${cmd}" is a real Linux command that SignalZero does not simulate.${cmd === 'tcpdump' ? ' In the apprenticeship bench, the FRAMES panel shows what "tcpdump -n -e" would print for your last command.' : ''} Type help for the commands this image supports.` }]);
+      return out([`${cmd}: command not found`]);
   }
 }
+
+// Real commands on Ubuntu that this image does not model: say so instead of pretending they do not exist.
+const LINUX_REAL = new Set(['tcpdump', 'arping', 'mtr', 'nc', 'netcat', 'telnet', 'wget', 'nmcli', 'resolvectl', 'ethtool', 'host', 'iptables', 'nft', 'man', 'apt', 'apt-get', 'top', 'ps', 'kill', 'less', 'tshark', 'whois', 'iw', 'bridge', 'tracepath6', 'ping4', 'networkctl', 'hostnamectl', 'timedatectl']);
 
 /** Save from the editor. */
 export function linuxSaveFile(eng, devId, path, text) {

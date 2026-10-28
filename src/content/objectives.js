@@ -7,7 +7,7 @@ export const OBJECTIVES = [
   { id: '1.4', domain: 1, title: 'Ports, protocols, services and traffic types', coverage: 'core', note: 'UDP 53/67/68, TCP 443/554, SIP 5060 drive real outcomes; broadcast vs unicast in DHCP relay.' },
   { id: '1.5', domain: 1, title: 'Transmission media and transceivers', coverage: 'partial', note: 'Copper patching, console vs Ethernet ports, TDR. No fiber/optics budget yet.' },
   { id: '1.6', domain: 1, title: 'Topologies, architectures and types', coverage: 'partial', note: 'Redundant risers and failure domains (M06).' },
-  { id: '1.7', domain: 1, title: 'IPv4 and IPv6 addressing', coverage: 'core', note: 'APIPA, subnet sizing, overlap, gateway placement (M02, M08, challenges); IPv6 prefixes, /64 for SLAAC, link-local, EUI-64, RFC 5952 notation (M11).' },
+  { id: '1.7', domain: 1, title: 'IPv4 network addressing', coverage: 'core', note: 'Prefix length and who is on-link, gateway placement (Apprenticeship L01); APIPA, subnet sizing, overlap (M02, M08, challenges). IPv6 addressing (M11) belongs to 1.8.' },
   { id: '1.8', domain: 1, title: 'Evolving use cases (IPv6, SDN/SD-WAN, VXLAN, zero trust...)', coverage: 'partial', note: 'IPv6 dual stack: SLAAC, router advertisements, neighbor discovery, link-local next hops, AAAA, IPv6 ACLs (M11). No SDN/SD-WAN/VXLAN/zero trust.' },
   { id: '2.1', domain: 2, title: 'Routing technologies (static, dynamic, NAT/PAT, FHRP...)', coverage: 'core', note: 'Static/default routes, recursive next hop, inter-VLAN routing, PAT. No dynamic routing yet.' },
   { id: '2.2', domain: 2, title: 'Switching technologies and features', coverage: 'core', note: 'VLANs, 802.1Q trunks, STP/RSTP, speed/duplex, PortFast, BPDU guard.' },

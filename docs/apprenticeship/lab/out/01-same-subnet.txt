@@ -1,0 +1,36 @@
+pca$ ip -4 addr show dev eth0
+76: eth0@if75: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000 link-netns sw1
+    inet 192.168.10.11/24 brd 192.168.10.255 scope global eth0
+       valid_lft forever preferred_lft forever
+[exit 0]
+pca$ ip -4 addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+76: eth0@if75: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000 link-netns sw1
+    inet 192.168.10.11/24 brd 192.168.10.255 scope global eth0
+       valid_lft forever preferred_lft forever
+[exit 0]
+pca$ ip route
+192.168.10.0/24 dev eth0 proto kernel scope link src 192.168.10.11 
+[exit 0]
+pca$ ip route get 192.168.10.12
+192.168.10.12 dev eth0 src 192.168.10.11 uid 0 
+    cache 
+[exit 0]
+pca$ ping -c 3 192.168.10.12
+PING 192.168.10.12 (192.168.10.12) 56(84) bytes of data.
+64 bytes from 192.168.10.12: icmp_seq=1 ttl=64 time=0.276 ms
+64 bytes from 192.168.10.12: icmp_seq=2 ttl=64 time=0.060 ms
+64 bytes from 192.168.10.12: icmp_seq=3 ttl=64 time=0.074 ms
+
+--- 192.168.10.12 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2040ms
+rtt min/avg/max/mdev = 0.060/0.136/0.276/0.098 ms
+[exit 0]
+pca$ ip neigh
+192.168.10.12 dev eth0 lladdr 02:00:00:00:0a:12 REACHABLE 
+[exit 0]
+pcb$ ip neigh
+192.168.10.11 dev eth0 lladdr 02:00:00:00:0a:11 DELAY 
+[exit 0]

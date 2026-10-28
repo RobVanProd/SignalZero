@@ -52,6 +52,15 @@ This falsifies the v0.3 assumption that a briefing plus three hints is enough on
 
 Not yet known: whether the coach over-scaffolds (players follow steps without understanding). Add to the playtest: after M04 with the coach on, give each player M07 (relay, no coach) and record whether they diagnose it unaided. If coach users do worse on unguided M07 than a coach-off group, the coach is teaching button-pressing.
 
+## Owner feedback, 27 Oct 2026: the knowledge gap
+
+The owner's verdict after more play: the game throws you into broken networks before teaching the ideas needed to fix them, and copying commands can win an incident without understanding. More missions, hints or rewards would not fix that. This falsifies the coach's premise (that guided steps on a broken network teach the concepts). Response, in [`docs/apprenticeship/`](apprenticeship/):
+
+- `AUDIT.md`: what M01–M05 assume and where (if anywhere) it is taught. The answer is mostly "after the fact, in a debrief". The DHCP incident is mostly Linux administration around a semicolon.
+- `LESSON-01.md`: one complete teaching sequence (working network → guided → changed example → fault → unguided case) for the earliest missing foundation: local delivery, ARP and the default gateway.
+- `VALIDATION.md`: the bench compared with the same network built from real Linux kernels (110 of 111 command outputs identical, 10 of 10 frame captures identical; mutation-checked).
+- `PLAYTEST.md`: the test that decides whether this approach works. No further lessons until it does.
+
 ## Pre-registered playtest (proposal — agree the thresholds before running it)
 
 Participants: 5 non-networking players + 5 Tier-1 technicians (your v0.2 design), no tutorial beyond the in-game briefing. 45 minutes in campaign, then free choice. Export each player's log (Settings → Playtest log → Export JSON).

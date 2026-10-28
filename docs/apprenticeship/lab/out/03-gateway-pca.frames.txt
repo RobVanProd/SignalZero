@@ -1,0 +1,8 @@
+02:00:00:00:0a:11 > ff:ff:ff:ff:ff:ff, ethertype ARP (0x0806), length 42: Request who-has 192.168.10.1 tell 192.168.10.11, length 28
+02:00:00:00:0a:01 > 02:00:00:00:0a:11, ethertype ARP (0x0806), length 42: Reply 192.168.10.1 is-at 02:00:00:00:0a:01, length 28
+02:00:00:00:0a:11 > 02:00:00:00:0a:01, ethertype IPv4 (0x0800), length 98: 192.168.10.11 > 192.168.20.10: ICMP echo request, id 6306, seq 1, length 64
+02:00:00:00:0a:01 > 02:00:00:00:0a:11, ethertype IPv4 (0x0800), length 98: 192.168.20.10 > 192.168.10.11: ICMP echo reply, id 6306, seq 1, length 64
+02:00:00:00:0a:11 > 02:00:00:00:0a:01, ethertype IPv4 (0x0800), length 98: 192.168.10.11 > 192.168.20.10: ICMP echo request, id 6306, seq 2, length 64
+02:00:00:00:0a:01 > 02:00:00:00:0a:11, ethertype IPv4 (0x0800), length 98: 192.168.20.10 > 192.168.10.11: ICMP echo reply, id 6306, seq 2, length 64
+02:00:00:00:0a:11 > 02:00:00:00:0a:01, ethertype IPv4 (0x0800), length 98: 192.168.10.11 > 192.168.20.10: ICMP echo request, id 6306, seq 3, length 64
+02:00:00:00:0a:01 > 02:00:00:00:0a:11, ethertype IPv4 (0x0800), length 98: 192.168.20.10 > 192.168.10.11: ICMP echo reply, id 6306, seq 3, length 64

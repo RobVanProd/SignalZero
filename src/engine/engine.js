@@ -51,6 +51,9 @@ export class Engine {
     this.rev = 0;
     this._stpDirty = true;
     this.listeners = new Set();
+    // recorded probes (the player's own commands), newest last; read by the apprenticeship's frame view
+    this.traffic = [];
+    this.trafficSeq = 0;
     this.reindex();
   }
 
@@ -146,6 +149,10 @@ export class Engine {
   probe(req) {
     this.ensure();
     const r = probe(this, req);
+    if (req.record) {
+      this.traffic.push({ seq: ++this.trafficSeq, t: this.s.t, req, r });
+      if (this.traffic.length > 60) this.traffic.splice(0, this.traffic.length - 60);
+    }
     if (req.record && r.fwd?.nat?.length) {
       const log = (this.s.natLog ||= []);
       for (const n of r.fwd.nat) log.push({ ...n, remote: req.dst, remotePort: req.dport ?? n.port, t: this.s.t });

@@ -1,0 +1,8 @@
+pca$ ip route get 192.168.20.10
+RTNETLINK answers: Network is unreachable
+[exit 2]
+pca$ ping -c 2 192.168.20.10
+ping: connect: Network is unreachable
+[exit 2]
+pca$ ip neigh
+[exit 0]

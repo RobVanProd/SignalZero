@@ -10,7 +10,8 @@ export function hostAddr(eng, d) {
   const up = eng.portUp(d.id, d.nic);
   if (!d.ipcfg.dhcp && d.ipcfg.static) {
     const s = d.ipcfg.static;
-    return { addr: s.addr, len: s.len, gw: s.gw ?? null, dns: s.dns || [], source: 'static', linkUp: up };
+    if (s.removed) return { addr: null, source: 'none', linkUp: up }; // address deleted at run time
+    return { addr: s.addr, len: s.len, gw: s.gw ?? null, routes: s.routes || [], dns: s.dns || [], source: 'static', linkUp: up };
   }
   if (d.lease) return { addr: d.lease.addr, len: d.lease.len, gw: d.lease.gw, dns: d.lease.dns || [], source: 'dhcp', domain: d.lease.domain, linkUp: up };
   if (d.apipa && !d.released) return { addr: d.apipa, len: 16, gw: null, dns: [], source: 'apipa', linkUp: up };
@@ -113,13 +114,21 @@ export function lookup(table, ip) {
 }
 
 /** Host routing decision. Returns { nh } | { error } */
+/**
+ * A host's forwarding decision (RFC 1122 3.3.1): longest match among its connected prefix, any extra routes
+ * (`ip route add NET/LEN via NH` on Linux) and the default gateway. On-link destinations are ARPed directly.
+ */
 export function hostNextHop(a, dst) {
   if (a.addr === null) return { error: 'no-address' };
-  if (inSubnet(dst, a.addr, a.len)) return { nh: dst, onLink: true };
   if (dst === 0xffffffff) return { nh: dst, onLink: true };
+  let best = inSubnet(dst, a.addr, a.len) ? { nh: dst, onLink: true, len: a.len } : null;
+  for (const r of a.routes || []) {
+    if (inSubnet(dst, r.net, r.len) && (!best || r.len > best.len)) best = r.nh === null || r.nh === undefined ? { nh: dst, onLink: true, len: r.len, route: r } : { nh: r.nh, onLink: false, len: r.len, route: r };
+  }
+  if (best) return best;
   if (a.gw === null || a.gw === undefined) return { error: 'no-route' };
   if (!inSubnet(a.gw, a.addr, a.len)) return { error: 'gateway-off-link' };
-  return { nh: a.gw, onLink: false };
+  return { nh: a.gw, onLink: false, len: 0 };
 }
 
 // ---------------------------------------------------------------- ACLs

@@ -1,0 +1,4 @@
+02:00:00:00:0a:11 > ff:ff:ff:ff:ff:ff, ethertype ARP (0x0806), length 42: Request who-has 10.20.30.100 tell 10.20.30.70, length 28
+02:00:00:00:0a:12 > 02:00:00:00:0a:11, ethertype ARP (0x0806), length 42: Reply 10.20.30.100 is-at 02:00:00:00:0a:12, length 28
+02:00:00:00:0a:11 > 02:00:00:00:0a:12, ethertype IPv4 (0x0800), length 98: 10.20.30.70 > 10.20.31.25: ICMP echo request, id 6534, seq 1, length 64
+02:00:00:00:0a:11 > 02:00:00:00:0a:12, ethertype IPv4 (0x0800), length 98: 10.20.30.70 > 10.20.31.25: ICMP echo request, id 6534, seq 2, length 64

@@ -1,0 +1,15 @@
+date: 2026-10-27T23:34:40Z
+kernel: 6.18.44-fc-v180
+userland: Ubuntu 24.04.5 LTS
+iproute2: ip utility, iproute2-6.1.0, libbpf 1.3.0
+iputils: ping from iputils 20240117
+tcpdump: tcpdump version 4.99.4
+pca net.ipv4.neigh.eth0.base_reachable_time_ms = 30000
+pca net.ipv4.neigh.eth0.retrans_time_ms = 1000
+pca net.ipv4.neigh.eth0.ucast_solicit = 3
+pca net.ipv4.neigh.eth0.mcast_solicit = 3
+pca net.ipv4.neigh.eth0.delay_first_probe_time = 5
+pca net.ipv4.neigh.eth0.gc_stale_time = 60
+r1 net.ipv4.ip_forward = 1
+r1 net.ipv4.conf.eth0.proxy_arp = 0
+IPv6 disabled in every namespace (the lesson is IPv4 only).

@@ -9,6 +9,7 @@ import { wallClock } from '../engine/engine.js';
 import { fmtIp6, parseIp6, parseIp6Zone, fmtAddr, isLinkLocal6 } from '../engine/ipv6.js';
 import { hostAddr6 } from '../engine/net6.js';
 import { winIpconfig6, winRoutePrint6, winNetshNeighbors, winNetshAddresses, winIfIndex } from './host6.js';
+import { neighbors, flushNeigh } from '../engine/neighbor.js';
 import { sshConnect, parseOpenSsh, OPENSSH_USAGE } from './ssh.js'; // ---- ospf (Act II)
 
 /** opts.user: a session opened over SSH (Windows OpenSSH Server, default shell cmd.exe). */
@@ -86,26 +87,6 @@ function ipconfig(eng, d, all) {
   return L;
 }
 
-function learnArp(eng, d, r) {
-  const hop = r?.fwd?.hops?.find(h => h.kind === 'l3');
-  if (!hop) return;
-  const od = eng.s.devices[hop.dev];
-  let mac = null;
-  let ip = null;
-  if (od.kind === 'router') {
-    const sub = od.subifs?.[hop.iface];
-    const port = od.ports[sub ? sub.parent : hop.iface];
-    mac = port?.mac;
-    ip = sub ? sub.ip?.addr : port?.ip?.addr;
-  } else if (od.kind === 'host') {
-    mac = od.ports[od.nic].mac;
-    ip = hostAddr(eng, od).addr;
-  }
-  if (mac && ip !== null && ip !== undefined) {
-    d.arpCache = d.arpCache || {};
-    d.arpCache[ip] = mac;
-  }
-}
 
 function resolveForTool(eng, d, target) {
   const lit = parseIp(target);
@@ -178,7 +159,6 @@ function ping(eng, d, args0) {
   for (let i = 0; i < count; i++) {
     const r = eng.probe({ from: d.id, dst: ip, proto: 'icmp', record: true, ...(oif ? { oif } : {}) });
     last = r;
-    if (i === 0 && !v6) learnArp(eng, d, r);
     if (r.status === 'local-error') {
       if (r.reason === 'arp-fail') { L.push(`Reply from ${fmtIp(hostAddr(eng, d).addr)}: Destination host unreachable.`); recv++; continue; }
       if (r.reason === 'nd-fail') { L.push(`Reply from ${F(r.fwd.pkt.src)}: Destination host unreachable.`); recv++; continue; }
@@ -403,14 +383,16 @@ function httpDate(eng) {
 
 function arp(eng, d, args) {
   if (!/^[-/]a$/i.test(args[0] || '') && !/^[-/]g$/i.test(args[0] || '')) {
-    if (/^[-/]d$/i.test(args[0] || '')) { d.arpCache = {}; return { lines: [] }; }
+    if (/^[-/]d$/i.test(args[0] || '')) { flushNeigh(d); return { lines: [] }; }
     return { lines: ['', 'Displays and modifies the IP-to-Physical address translation tables used by', 'address resolution protocol (ARP).', '', 'ARP -a [inet_addr]', 'ARP -d inet_addr'] };
   }
   const a = hostAddr(eng, d);
   if (a.addr === null) return { lines: ['No ARP Entries Found.'] };
   const L = ['', `Interface: ${fmtIp(a.addr)} --- 0x${d.nic === 'wlan0' ? '9' : '7'}`, '  Internet Address      Physical Address      Type'];
-  for (const [ip, mac] of Object.entries(d.arpCache || {})) {
-    L.push(`  ${fmtIp(Number(ip)).padEnd(22)}${macWindows(mac).toLowerCase().padEnd(22)}dynamic`);
+  // the same neighbour table as every other view (learned from traffic; see engine/neighbor.js)
+  for (const n of neighbors(eng, d)) {
+    if (!n.mac) continue;
+    L.push(`  ${fmtIp(n.ip).padEnd(22)}${macWindows(n.mac).toLowerCase().padEnd(22)}dynamic`);
   }
   L.push(`  ${fmtIp(broadcastOf(a.addr, a.len)).padEnd(22)}${'ff-ff-ff-ff-ff-ff'.padEnd(22)}static`, `  ${'224.0.0.22'.padEnd(22)}${'01-00-5e-00-00-16'.padEnd(22)}static`, `  ${'255.255.255.255'.padEnd(22)}${'ff-ff-ff-ff-ff-ff'.padEnd(22)}static`);
   return { lines: L };
@@ -506,7 +488,7 @@ export function winExecute(eng, sess, raw) {
     }
     case 'exit':
       if (sess.user) return { lines: [], logout: true };
-      return { lines: [`'${parts[0]}' is not recognized as an internal or external command,`, 'operable program or batch file.'] };
+      return { lines: [{ t: 'note', sim: true, text: 'simulator: "exit" would close this Command Prompt window. Close the console with Esc or ×.' }] };
     case 'getmac': return { lines: ['', 'Physical Address    Transport Name', '=================== ==========================================================', `${macWindows(d.ports[d.nic].mac)}   \\Device\\Tcpip_{4D36E972-E325-11CE-BFC1-08002BE10318}`] };
     case 'ipconfig': {
       // ---- ipv6: note when the player has looked at a global (SLAAC or static) IPv6 address
@@ -560,8 +542,14 @@ export function winExecute(eng, sess, raw) {
     case 'traceroute': return { lines: [`'traceroute' is not recognized as an internal or external command,`, 'operable program or batch file.', { t: 'note', text: 'trainer: on Windows the command is tracert.' }] };
     case 'ifconfig': case 'ip': return { lines: [`'${cmd}' is not recognized as an internal or external command,`, 'operable program or batch file.', { t: 'note', text: 'trainer: on Windows use ipconfig (or ipconfig /all).' }] };
     case 'dig': return { lines: [`'dig' is not recognized as an internal or external command,`, 'operable program or batch file.', { t: 'note', text: 'trainer: Windows ships nslookup; dig is a Linux/BIND tool.' }] };
-    default: return { lines: [`'${parts[0]}' is not recognized as an internal or external command,`, 'operable program or batch file.'] };
+    default:
+      if (WIN_REAL.has(cmd)) return { lines: [{ t: 'note', sim: true, text: `simulator: "${parts[0]}" is a real Windows command that SignalZero does not simulate. Type help for the commands this image supports.` }] };
+      return { lines: [`'${parts[0]}' is not recognized as an internal or external command,`, 'operable program or batch file.'] };
   }
 }
+
+// Built into a default Windows 11 install but not modelled here (telnet and tftp are optional features, so a
+// default install really does answer "not recognized" for them).
+const WIN_REAL = new Set(['netstat', 'nbtstat', 'systeminfo', 'tasklist', 'taskkill', 'net', 'powershell', 'nltest', 'ftp', 'certutil', 'sc', 'wmic', 'msinfo32', 'ncpa.cpl', 'control']);
 
 export const WIN_COMMANDS = ['ipconfig', 'ipconfig /all', 'ipconfig /renew', 'ipconfig /release', 'ipconfig /flushdns', 'ipconfig /displaydns', 'ping', 'tracert', 'pathping', 'nslookup', 'curl', 'arp -a', 'route print', 'hostname', 'getmac', 'cls', 'help', 'netsh interface ipv6 show neighbors', 'netsh interface ipv6 show addresses', 'route print -6', 'ssh'];

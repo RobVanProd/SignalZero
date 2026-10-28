@@ -1,0 +1,20 @@
+srv$ ip route del default
+[exit 0]
+pca$ ping -c 2 10.20.31.25
+PING 10.20.31.25 (10.20.31.25) 56(84) bytes of data.
+
+--- 10.20.31.25 ping statistics ---
+2 packets transmitted, 0 received, 100% packet loss, time 1015ms
+
+[exit 1]
+srv$ ip route add default via 10.20.31.1
+[exit 0]
+pca$ ping -c 2 10.20.31.25
+PING 10.20.31.25 (10.20.31.25) 56(84) bytes of data.
+64 bytes from 10.20.31.25: icmp_seq=1 ttl=63 time=0.049 ms
+64 bytes from 10.20.31.25: icmp_seq=2 ttl=63 time=0.064 ms
+
+--- 10.20.31.25 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1032ms
+rtt min/avg/max/mdev = 0.049/0.056/0.064/0.007 ms
+[exit 0]

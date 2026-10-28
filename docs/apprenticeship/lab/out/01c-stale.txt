@@ -1,0 +1,4 @@
+pca$ ip neigh
+192.168.10.99 dev eth0 FAILED 
+192.168.10.12 dev eth0 lladdr 02:00:00:00:0a:12 STALE 
+[exit 0]

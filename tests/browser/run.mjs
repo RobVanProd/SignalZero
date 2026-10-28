@@ -118,8 +118,9 @@ try {
 
   const c = await page({ width: 1366, height: 800 }, '?q=low');
   await step('Night Shift challenge: ticket, unguided fix from the consoles, closed once', async () => {
-    // Seed 27 injects a single 'named-stopped' fault (asserted below, so a generator change fails loudly).
-    await c.p.evaluate(() => window.__SZ__.app.startChallenge({ faults: 1, seed: 27 }));
+    // Seed 38 injects a single 'named-stopped' fault (asserted below, so a generator change fails loudly; the Act II
+    // faults added to the pool moved it from seed 27).
+    await c.p.evaluate(() => window.__SZ__.app.startChallenge({ faults: 1, seed: 38 }));
     await c.p.waitForSelector('text=Take the ticket');
     await c.p.screenshot({ path: path.join(OUT, '11-ticket.png') });
     assert.deepEqual(await c.p.evaluate(() => window.__SZ__.app.challenge.ch.faults.map(f => f.id)), ['named-stopped']);

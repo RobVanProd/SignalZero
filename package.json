@@ -2,13 +2,14 @@
   "name": "signal-zero",
   "version": "0.3.0",
   "private": true,
-  "description": "SIGNAL//ZERO — a first-person network operations game that teaches applied networking through a deterministic network simulation.",
+  "description": "SIGNAL//ZERO \u2014 a first-person network operations game that teaches applied networking through a deterministic network simulation.",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test tests/unit/*.test.js",
     "test:browser": "node tests/browser/run.mjs",
-    "dev": "node scripts/build.mjs --watch"
+    "dev": "node scripts/build.mjs --watch",
+    "test:lesson": "node tests/browser/lesson.mjs"
   },
   "dependencies": {
     "three": "0.186.1"

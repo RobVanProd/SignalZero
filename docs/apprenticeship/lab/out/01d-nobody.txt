@@ -1,0 +1,13 @@
+pca$ ping -c 2 192.168.10.99
+PING 192.168.10.99 (192.168.10.99) 56(84) bytes of data.
+From 192.168.10.11 icmp_seq=1 Destination Host Unreachable
+From 192.168.10.11 icmp_seq=2 Destination Host Unreachable
+
+--- 192.168.10.99 ping statistics ---
+2 packets transmitted, 0 received, +2 errors, 100% packet loss, time 1022ms
+pipe 2
+[exit 1]
+pca$ ip neigh
+192.168.10.99 dev eth0 FAILED 
+192.168.10.12 dev eth0 lladdr 02:00:00:00:0a:12 REACHABLE 
+[exit 0]

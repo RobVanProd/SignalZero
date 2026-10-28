@@ -50,7 +50,7 @@ export class Telemetry {
   }
 
   export() {
-    return JSON.stringify({ exportedAt: new Date().toISOString(), note: 'SIGNAL//ZERO local playtest log. Contains no personal data beyond your browser user-agent.', summaries: this.data.sessions.map(s => this.summary(s)), raw: this.data }, null, 2);
+    return JSON.stringify({ exportedAt: new Date().toISOString(), note: 'SIGNAL//ZERO local playtest log. Contains your browser user-agent and the answers you typed in apprenticeship lessons; nothing else personal.', summaries: this.data.sessions.map(s => this.summary(s)), raw: this.data }, null, 2);
   }
 }
 

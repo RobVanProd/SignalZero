@@ -1,0 +1,22 @@
+$ ipconfig
+Command 'ipconfig' not found, did you mean:
+  command 'iconfig' from deb ipmiutil (3.1.9-3)
+  command 'iwconfig' from deb wireless-tools (30~pre9-13.1ubuntu4)
+  command 'ifconfig' from deb net-tools (2.10-0.1ubuntu4.4)
+  command 'hipconfig' from deb hipcc (5.2.3-12)
+Try: apt install <deb name>
+$ ifconfig
+Command 'ifconfig' not found, but can be installed with:
+apt install net-tools
+$ arp
+Command 'arp' not found, but can be installed with:
+apt install net-tools
+$ route
+Command 'route' not found, but can be installed with:
+apt install net-tools
+$ netstat
+Command 'netstat' not found, but can be installed with:
+apt install net-tools
+$ nmap
+Command 'nmap' not found, but can be installed with:
+apt install nmap

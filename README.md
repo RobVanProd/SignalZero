@@ -27,6 +27,7 @@ Open `dist/signal-zero.html` in a current Chrome, Edge, Firefox or Safari. If yo
 
 | Mode | What it trains |
 |---|---|
+| **Apprenticeship · Lesson 1: Next hop** (start here; a 2D bench, not the 3D world) | How a host decides where to send a packet: address and prefix length, ARP for the next hop, the default gateway, the return path. It shows a working network first, then guided use, a changed example, one fault, and an unguided case. Outputs are compared with the same network built from real Linux kernels. See [`docs/apprenticeship/`](docs/apprenticeship/). |
 | **Night shift campaign** (10 incidents, one persistent network; incidents 1–4 come with a step-by-step coach) | Guided: physical patching, DHCP service failure, stale DNS + client cache, uninstalled default route, VLAN + ACL segmentation, broadcast storm with an aftershock, DHCP relay, subnet re-planning for 50 cameras, duplex mismatch vs voice quality, rogue DHCP. |
 | **Incident replay** | Any solved incident from a clean copy of the network at that point. |
 | **Night Shift challenge** | Unguided: randomised addressing and VLAN IDs, 1–2 injected faults from a library of 15, a symptom-only trouble ticket, no trainer notes. The generator proves each challenge is solvable before handing it out. |
@@ -69,13 +70,16 @@ docs/           simulation model, curriculum map, QA status and the next falsifi
 ```bash
 npm test                # unit + mission + generator tests (node:test)
 npm run test:browser    # needs `npm run build` first; real WebGL via SwiftShader; screenshots -> tests/browser/out/
+npm run test:lesson     # Lesson 1 played through the real UI (desktop and phone); needs `npm run build` first
+node scripts/lab-compare.mjs   # simulator vs the real-kernel lab in docs/apprenticeship/lab (also part of npm test)
 ```
 
 ## Honest status
 
 - Simulation, missions and generator: covered by automated tests (see [`docs/QA_AND_NEXT_ITERATION.md`](docs/QA_AND_NEXT_ITERATION.md)).
 - Rendering: exercised in headless Chromium with a software WebGL 2 implementation, not on real GPUs or phones. Frame rate on real devices is unmeasured. Whether the art style helps or hinders reading the network over a full shift is untested.
-- Learning: **not yet tested with learners.** Nothing here shows that players enjoy it, learn from it, or transfer skills. The pre-registered playtest in the QA document is the next decision gate.
+- Learning: **not yet tested with learners.** Nothing here shows that players enjoy it, learn from it, or transfer skills. The next decision gate is the Lesson 1 playtest ([`docs/apprenticeship/PLAYTEST.md`](docs/apprenticeship/PLAYTEST.md)); no further lessons until it shows the lesson closes the gap.
+- Realism of Lesson 1: 110 of 111 lab commands print the same as real iproute2/iputils, and all 10 frame captures match ([`docs/apprenticeship/VALIDATION.md`](docs/apprenticeship/VALIDATION.md)). Windows and Cisco IOS outputs elsewhere in the game have not been compared with real devices.
 - Scope: a subset of N10-009 ([`docs/CURRICULUM.md`](docs/CURRICULUM.md)). Not an exam-prep substitute.
 
 Unofficial. Not affiliated with or endorsed by CompTIA or Cisco. Network+ is a trademark of CompTIA. Addresses use RFC 1918 and documentation ranges (198.51.100.0/24, 203.0.113.0/24); domains use `.example`. Third-party licences (three.js MIT; fonts SIL OFL 1.1): [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).

@@ -1,0 +1,26 @@
+pca$ ip route replace default via 192.168.10.254
+[exit 0]
+pca$ ip route add 192.168.20.0/24 via 192.168.10.1
+[exit 0]
+pca$ ip route
+default via 192.168.10.254 dev eth0 
+192.168.10.0/24 dev eth0 proto kernel scope link src 192.168.10.11 
+192.168.20.0/24 via 192.168.10.1 dev eth0 
+[exit 0]
+pca$ ip route get 192.168.20.10
+192.168.20.10 via 192.168.10.1 dev eth0 src 192.168.10.11 uid 0 
+    cache 
+[exit 0]
+pca$ ping -c 2 192.168.20.10
+PING 192.168.20.10 (192.168.20.10) 56(84) bytes of data.
+64 bytes from 192.168.20.10: icmp_seq=1 ttl=63 time=0.051 ms
+64 bytes from 192.168.20.10: icmp_seq=2 ttl=63 time=0.070 ms
+
+--- 192.168.20.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1031ms
+rtt min/avg/max/mdev = 0.051/0.060/0.070/0.009 ms
+[exit 0]
+pca$ ip route del 192.168.20.0/24 via 192.168.10.1
+[exit 0]
+pca$ ip route replace default via 192.168.10.1
+[exit 0]

@@ -99,7 +99,8 @@ export class TerminalWindow {
     clear(this.out);
     const frag = document.createDocumentFragment();
     for (const l of c.lines.slice(-400)) {
-      if (l.t === 'note') { if (l.coach ? this.app.coach.active : this.app.trainerNotes) frag.append(h('span', { class: `note${l.coach ? ' coach' : ''}` }, l.text)); continue; }
+      // simulator notes (a real command that is not modelled, a disclosed simplification) always show
+      if (l.t === 'note') { if (l.sim || (l.coach ? this.app.coach.active : this.app.trainerNotes)) frag.append(h('span', { class: `note${l.coach ? ' coach' : ''}${l.sim ? ' sim' : ''}` }, l.text)); continue; }
       if (l.t === 'cmd') { frag.append(h('div', { class: 'ln cmd' }, h('span', { class: 'pr' }, l.prompt + ' '), l.text)); continue; }
       frag.append(h('div', { class: 'ln' }, l.text));
     }
@@ -112,7 +113,7 @@ export class TerminalWindow {
     const c = this.console(this.devId);
     for (const l of lines) {
       if (typeof l === 'string') c.lines.push({ t: 'out', text: l });
-      else if (l && l.t === 'note') c.lines.push({ t: 'note', text: l.text, coach: !!l.coach });
+      else if (l && l.t === 'note') c.lines.push({ t: 'note', text: l.text, coach: !!l.coach, sim: !!l.sim });
     }
     if (c.lines.length > 600) c.lines.splice(0, c.lines.length - 600);
   }

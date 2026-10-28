@@ -1,0 +1,30 @@
+pca$ ip route add default via 10.20.30.100
+[exit 0]
+pca$ ping -c 2 10.20.31.25
+PING 10.20.31.25 (10.20.31.25) 56(84) bytes of data.
+
+--- 10.20.31.25 ping statistics ---
+2 packets transmitted, 0 received, 100% packet loss, time 1032ms
+
+[exit 1]
+pca$ ip neigh
+10.20.30.100 dev eth0 lladdr 02:00:00:00:0a:12 REACHABLE 
+[exit 0]
+pcb$ ip neigh
+10.20.30.126 dev eth0 lladdr 02:00:00:00:0a:01 REACHABLE 
+10.20.30.70 dev eth0 lladdr 02:00:00:00:0a:11 STALE 
+[exit 0]
+pcb$ sysctl net.ipv4.ip_forward
+net.ipv4.ip_forward = 0
+[exit 0]
+pca$ ip route replace default via 10.20.30.126
+[exit 0]
+pca$ ping -c 2 10.20.31.25
+PING 10.20.31.25 (10.20.31.25) 56(84) bytes of data.
+64 bytes from 10.20.31.25: icmp_seq=1 ttl=63 time=0.201 ms
+64 bytes from 10.20.31.25: icmp_seq=2 ttl=63 time=0.061 ms
+
+--- 10.20.31.25 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1006ms
+rtt min/avg/max/mdev = 0.061/0.131/0.201/0.070 ms
+[exit 0]

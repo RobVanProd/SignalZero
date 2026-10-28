@@ -15,6 +15,7 @@ import { flood } from './switching.js';
 import { hostAddr, hostNextHop, l3Ifaces, routeTable, lookup, evalAcl, natOutbound } from './routing.js';
 import { fmtIp, inSubnet } from './ipv4.js';
 import { sendPacket6, initialHopLimit } from './trace6.js';
+import { neighRecord } from './neighbor.js';
 
 const MAX_L3_HOPS = 32;
 
@@ -97,10 +98,11 @@ export function sendPacket(eng, opts) {
   const notes = [];
   const hops = [];
   const nat = opts.nat || [];
+  const arps = []; // what each sender's ARP table did at each next hop (recorded traffic only; see neighbor.js)
   let pass = 1;
   let latency = 0;
   let jitter = 0;
-  const fail = (outcome, at, reason, extra = {}) => ({ outcome, at, reason, pkt, hops, notes, pass, latency, jitter, nat, ...extra });
+  const fail = (outcome, at, reason, extra = {}) => ({ outcome, at, reason, pkt, hops, notes, pass, latency, jitter, nat, arps, ...extra });
 
   let pkt = { src: null, dst: opts.dst, proto: opts.proto, sport: opts.sport ?? 49152, dport: opts.dport, ttl: opts.ttl ?? initialTtl(src), icmpType: opts.icmpType ?? 'echo' };
   if (pkt.proto === 'tcp') pkt.flags = opts.flags ?? ['syn'];
@@ -117,17 +119,17 @@ export function sendPacket(eng, opts) {
     const a = src.kind === 'fleet' && opts.member ? { addr: opts.member.addr, len: opts.member.len, gw: opts.member.gw } : hostAddr(eng, src);
     pkt.src = opts.srcIp ?? a.addr;
     if (a.addr === null) return fail('local-error', src.id, 'no-address');
-    if (pkt.dst === a.addr) return { outcome: 'delivered', at: src.id, service: hostService(src, pkt), pkt, hops, notes, pass, latency, jitter, nat };
+    if (pkt.dst === a.addr) return { outcome: 'delivered', at: src.id, service: hostService(src, pkt), pkt, hops, notes, pass, latency, jitter, nat, arps };
     const r = hostNextHop(a, pkt.dst);
     if (r.error) return fail('local-error', src.id, r.error);
     nh = r.nh;
     egressIf = { name: src.nic, port: src.nic, tag: null, addr: a.addr, len: a.len };
-    notes.push({ dev: src.id, layer: 3, text: r.onLink ? `${fmtIp(pkt.dst)} is on-link (${fmtIp(a.addr)}/${a.len}); ARP for it directly` : `${fmtIp(pkt.dst)} is off-link; send to default gateway ${fmtIp(a.gw)}` });
+    notes.push({ dev: src.id, layer: 3, text: r.onLink ? `${fmtIp(pkt.dst)} is on-link (${fmtIp(a.addr)}/${a.len}); ARP for it directly` : r.route ? `${fmtIp(pkt.dst)} matches route ${fmtIp(r.route.net)}/${r.route.len}; send to ${fmtIp(r.nh)}` : `${fmtIp(pkt.dst)} is off-link; send to default gateway ${fmtIp(a.gw)}` });
   } else if (src.kind === 'router') {
     const rt = eng.routes(src.id);
     if (l3Ifaces(eng, src).some(i => i.addr === pkt.dst && i.up)) {
       pkt.src = pkt.dst;
-      return { outcome: 'delivered', at: src.id, service: routerService(pkt, null, src), pkt, hops, notes, pass, latency, jitter, nat };
+      return { outcome: 'delivered', at: src.id, service: routerService(pkt, null, src), pkt, hops, notes, pass, latency, jitter, nat, arps };
     }
     const r = lookup(rt.table, pkt.dst);
     if (!r) return fail('local-error', src.id, 'no-route');
@@ -141,6 +143,7 @@ export function sendPacket(eng, opts) {
   for (let step = 0; step < MAX_L3_HOPS; step++) {
     // ---- L2 delivery to next hop on egress segment
     const arp = arpResolve(eng, cur.id, egressIf.port, egressIf.tag, nh);
+    if (opts.record) arps.push({ ...neighRecord(eng, cur, egressIf, nh, arp), ttl: pkt.ttl, pkt: { ...pkt } });
     if (!arp.ep) {
       const why = arp.flood.drops.find(x => x.stp || x.snoop) || null;
       notes.push({ dev: cur.id, layer: 2, text: `ARP for ${fmtIp(nh)} unanswered on ${egressIf.name}${why ? ` (${why.reason} at ${st.devices[why.dev].hostname} ${why.port})` : ''}` });
@@ -163,7 +166,7 @@ export function sendPacket(eng, opts) {
     if (cur.kind === 'host' || cur.kind === 'fleet') {
       const owns = cur.kind === 'fleet' ? cur.leases.some(l => l.addr === pkt.dst) : hostAddr(eng, cur).addr === pkt.dst;
       if (!owns) return fail('dropped', cur.id, `${cur.hostname} is not a router; it discards packets for ${fmtIp(pkt.dst)}`);
-      return { outcome: 'delivered', at: cur.id, service: hostService(cur, pkt), pkt, hops, notes, pass, latency, jitter, nat, ttl: pkt.ttl };
+      return { outcome: 'delivered', at: cur.id, service: hostService(cur, pkt), pkt, hops, notes, pass, latency, jitter, nat, arps, ttl: pkt.ttl };
     }
     // router
     ingress = l3Ifaces(eng, cur).find(i => i.name === arp.ep.l3if);
@@ -187,7 +190,7 @@ export function sendPacket(eng, opts) {
       }
     }
     if (l3Ifaces(eng, cur).some(i => i.addr === pkt.dst && i.up)) {
-      return { outcome: 'delivered', at: cur.id, service: routerService(pkt, ingress, cur), pkt, hops, notes, pass, latency, jitter, nat, ingress: ingress.name, ttl: pkt.ttl };
+      return { outcome: 'delivered', at: cur.id, service: routerService(pkt, ingress, cur), pkt, hops, notes, pass, latency, jitter, nat, arps, ingress: ingress.name, ttl: pkt.ttl };
     }
     if (pkt.ttl <= 1) {
       return fail('ttl-exceeded', cur.id, 'TTL expired in transit', { icmpFrom: ingress.addr, ingress: ingress.name });

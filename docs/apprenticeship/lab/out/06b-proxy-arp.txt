@@ -1,0 +1,12 @@
+pca$ ping -c 2 192.168.20.10
+PING 192.168.20.10 (192.168.20.10) 56(84) bytes of data.
+64 bytes from 192.168.20.10: icmp_seq=1 ttl=63 time=631 ms
+64 bytes from 192.168.20.10: icmp_seq=2 ttl=63 time=0.077 ms
+
+--- 192.168.20.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1000ms
+rtt min/avg/max/mdev = 0.077/315.539/631.001/315.462 ms
+[exit 0]
+pca$ ip neigh
+192.168.20.10 dev eth0 lladdr 02:00:00:00:0a:01 REACHABLE 
+[exit 0]
