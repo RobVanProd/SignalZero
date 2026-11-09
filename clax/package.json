@@ -1,0 +1,13 @@
+{
+  "name": "clax-the-unsinkable",
+  "version": "0.2.0",
+  "private": true,
+  "description": "CLAX — The Unsinkable. A 2D action platformer. Single-file HTML build, no dependencies at runtime.",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node tests/logic.js && node tests/reach.js",
+    "test:browser": "node tests/browser.js",
+    "rig": "python3 tools/cut_rig.py"
+  }
+}
