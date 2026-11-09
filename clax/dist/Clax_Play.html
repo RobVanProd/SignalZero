@@ -242,15 +242,12 @@ function stepPlayer(p, inp, L, dt, ev = () => {}) {
       return g;
     };
     ground = pick(p.x, ny);
+    // stay glued to the ground when running over crests and down slopes (centre first, so descents start smoothly)
+    if (!ground && wasGrounded && !jumped && p.drop <= 0) ground = probe(L, p.x, ny, ny + 14 + Math.abs(p.vx) * dt * 1.6, true);
     if (!ground) { const a = pick(p.x - K.foot, ny), b = pick(p.x + K.foot, ny); ground = a && b ? (a.y < b.y ? a : b) : a || b; if (ground && ground.slope) ground = null; }
     if (ow) for (const q of L.movers) {
       if (q.absent > 0) continue;
       if (p.x > q.x - 12 && p.x < q.x + q.w + 12 && oldY <= q.y - (q.dy || 0) + 9 && ny >= q.y && (!ground || q.y < ground.y)) { ground = { y: q.y, slope: 0, oneWay: true, bouncy: false }; support = q; }
-    }
-    // stay glued to the ground when running over crests and down slopes
-    if (!ground && wasGrounded && !jumped && p.drop <= 0) {
-      const g = probe(L, p.x, ny, ny + 14 + Math.abs(p.vx) * dt * 1.6, true);
-      if (g) ground = g;
     }
   }
   if (ground) {
@@ -306,9 +303,9 @@ const P = root.CLAX_PHYS || require('./phys.js');
 const TS = P.TS;
 
 const biomes = [
-  { id: 'yard', name: 'Sunken Rescue Yard', subtitle: 'UNAUTHORIZED DEPARTURE', tag: '01 / SALVAGE DISTRICT', sky: ['#092a38', '#29717a'], deep: '#06202b', haze: '#1d6672', accent: '#64e4d6', floor: '#284a49', edge: '#eaa349', shadow: '#092735', tex: 'metal_teal', wall: '#0c2c36', cap: '#e8923f', capDark: '#22323a', fog: 'rgba(16,74,84,' },
-  { id: 'fortress', name: 'The Inflatable Fortress', subtitle: 'SAFETY IS MANDATORY', tag: '02 / BUREAU TERRITORY', sky: ['#1b3657', '#81b2c2'], deep: '#1a2f44', haze: '#789fac', accent: '#ffe4a2', floor: '#6a6257', edge: '#ffad4e', shadow: '#263947', tex: 'metal_orange', wall: '#3a3440', cap: '#f3e2bd', capDark: '#c9662c', fog: 'rgba(120,160,180,' },
-  { id: 'carnival', name: 'Pressure Trench Carnival', subtitle: 'NO REFUNDS. NO ESCAPE.', tag: '03 / THE LAST RELIEF VALVE', sky: ['#160e32', '#43204d'], deep: '#110e29', haze: '#4e2d69', accent: '#ef95de', floor: '#3c2852', edge: '#f4bf59', shadow: '#1e1634', tex: 'purple', wall: '#1d1233', cap: '#f0b84f', capDark: '#4a2060', fog: 'rgba(70,36,110,' }];
+  { id: 'yard', name: 'Sunken Rescue Yard', subtitle: 'UNAUTHORIZED DEPARTURE', tag: '01 / SALVAGE DISTRICT', sky: ['#092a38', '#29717a'], deep: '#06202b', haze: '#1d6672', accent: '#64e4d6', floor: '#284a49', edge: '#eaa349', shadow: '#092735', tex: 'metal_teal', wall: '#082029', cap: '#e8923f', capDark: '#22323a', fog: 'rgba(16,74,84,' },
+  { id: 'fortress', name: 'The Inflatable Fortress', subtitle: 'SAFETY IS MANDATORY', tag: '02 / BUREAU TERRITORY', sky: ['#1b3657', '#81b2c2'], deep: '#1a2f44', haze: '#789fac', accent: '#ffe4a2', floor: '#a07a55', edge: '#ffad4e', shadow: '#263947', tex: 'metal_orange', wall: '#2c2734', cap: '#f3e2bd', capDark: '#c9662c', fog: 'rgba(120,160,180,' },
+  { id: 'carnival', name: 'Pressure Trench Carnival', subtitle: 'NO REFUNDS. NO ESCAPE.', tag: '03 / THE LAST RELIEF VALVE', sky: ['#160e32', '#43204d'], deep: '#110e29', haze: '#4e2d69', accent: '#ef95de', floor: '#3c2852', edge: '#f4bf59', shadow: '#1e1634', tex: 'purple', wall: '#150d26', cap: '#f0b84f', capDark: '#4a2060', fog: 'rgba(70,36,110,' }];
 
 const lines = {
   snap: ['Stand back! I am almost qualified!', 'I read HALF the warning!', 'That was a controlled catastrophe.', 'Your concern has been ignored.', 'Not stolen. Urgently reassigned.', 'I brought my own applause.', 'Put that on my heroic record.'],
@@ -520,7 +517,7 @@ function yard() {
   B.hook(184.5, 23, { ax: 1.6, speed: 1.1 }); B.hook(190.5, 23, { ax: 1.6, speed: 1.1, phase: 2.2 }); B.mover(185.5, 30, 2.5, { ax: 3.4, speed: .8 });
   B.arc(181.5, 26.4, 10, 12, -1.3);
   B.hint(178, 'The crane rings move. So should you.', 'A slow platform runs below if the claw is feeling shy.');
-  R(203, 19, 2, 8); deck(205, 23, 3); B.spring(206.5, 24); B.npc(203.5, 15, 'GUS', 'crane operator', 'I have been up here since Tuesday. Nice view. No stairs.'); B.tags(205.5, 22.2, 3);
+  R(203, 19, 2, 4); deck(205, 23, 3); B.deco('chain', 204, 9, { len: 9 }); B.spring(206.5, 24); B.npc(203.5, 15, 'GUS', 'crane operator', 'I have been up here since Tuesday. Nice view. No stairs.'); B.tags(205.5, 22.2, 3);
   E('eel', 197, 26); E('crab', 207, 24); B.vent(212, 26, 1.2); B.item('pressure', 198, 26); B.crate(214, 26);
   B.cp(215, 26);
   B.deco('crane', 180, 29, { h: 12 }); B.deco('crane', 196, 29, { h: 12, flip: true }); B.deco('chain', 187, 12, { len: 8 }); B.deco('lamp', 201, 27); B.deco('lamp', 169, 29);
@@ -536,7 +533,7 @@ const L1 = {};
 
 /* ------------------------------------------------------------------ 02 THE INFLATABLE FORTRESS */
 function fortress() {
-  const B = builder(1, 214, 62), { T, R, C, BK, deck, E } = B;
+  const B = builder(1, 195, 62), { T, R, C, BK, deck, E } = B;
   // -- Visitor Processing
   T(0, 54, 'F9 O3 F5 S-3 F7 O3 S-4 F9');
   B.start(3, 48); B.sign(6, 48, 'YOUR SAFETY\nIS NOT OPTIONAL.');
@@ -546,12 +543,12 @@ function fortress() {
   E('warden', 32, 44); B.crate(30, 44); B.item('pressure', 34, 44); B.cp(35, 44);
   B.deco('flag', 14, 51); B.deco('banner', 18, 46.4, { text: 'NOW SERVING: NOBODY' }); B.deco('flag', 27, 47); B.deco('lamp', 31, 47);
   // -- The Bouncy Bailey
-  T(36, 47, 'F3 G2 O8 F2 U2 F5 O4 G3 F6 S-5 F8');
+  T(36, 47, 'F3 G2 O8 F2 U2 F5 O4 G3 F6 S-3 F9');
   B.area(36, 'THE BOUNCY BAILEY', 'A courtyard rated for fun. Fun has since been prohibited.');
   B.radio(38, [['DRYDOCK', 'The bailey is inflated to regulation firmness. Any enjoyment you experience is a malfunction.'], ['CLAX', 'ADA, log one malfunction.']]);
-  deck(43, 41, 3); deck(48, 39, 3); B.tags(43, 40.2, 3); B.tags(48, 38.2, 3); B.npc(49, 36, 'OTTO', 'filed a complaint in person', 'I only asked where the exit was. That was the offence.');
-  E('turret', 52, 44); E('guard', 56, 42); B.arc(41, 45, 8, 8, 3.5); B.trail(53, 58, 42, 1.5);
-  E('buoy', 61, 40); B.arc(59, 44, 4, 4, 3); B.spikes(63, 60, 3);
+  deck(43, 42, 3); deck(48, 40, 3); B.tags(43, 41.2, 3); B.tags(48, 39.2, 3); B.npc(49, 37, 'OTTO', 'filed a complaint in person', 'I only asked where the exit was. That was the offence.');
+  E('turret', 54, 43); E('guard', 56, 42); B.arc(41, 45, 8, 8, 3.5); B.trail(53, 58, 42, 1.5);
+  E('buoy', 61, 40); B.arc(59, 44, 4, 4, 3);
   E('torpedo', 67, 43.6); B.item('pressure', 66, 44); B.spring(70.5, 44, -1180); B.tags(70.5, 42, 4, 0, -1.2);
   B.hint(66, 'Wall too tall? Springs, bounce floors and wall kicks all stack.', '');
   E('warden', 75, 39); B.crate(77, 39); B.cp(79, 39);
@@ -582,13 +579,13 @@ function fortress() {
   E('torpedo', 112, 15.3); B.trail(107, 115, 14, 1.5); B.hook(118.5, 12.6); B.arc(116, 15.4, 5, 5, -1.2);
   E('guard', 122, 15); E('turret', 126, 15); B.item('pressure', 124, 15);
   B.hook(131, 12, { ax: 1.4, speed: 1 }); B.hook(136.5, 12, { ax: 1.4, speed: 1, phase: 2 }); B.mover(131.5, 19, 2.5, { ax: 3.2, speed: .75 }); B.arc(128.5, 15.2, 9, 11, -1.4);
-  B.npc(144, 12, 'BRINE', 'former safety inspector', 'I found one problem. He promoted me to prisoner.'); deck(142, 13, 4); B.tags(142, 12.2, 4);
-  E('warden', 146, 13); E('buoy', 141, 10.6); B.vent(148, 13, .6); B.spring(155.5, 14, -1150, 420, .3); B.arc(152, 14, 5, 5, 2);
-  B.cp(160, 12); E('torpedo', 163, 11); B.item('health', 162, 12); B.crate(164, 12);
+  deck(142, 14, 4); B.npc(144, 12.5, 'BRINE', 'former safety inspector', 'I found one problem. He promoted me to prisoner.'); B.tags(142, 13.2, 4);
+  E('warden', 146, 13); E('buoy', 141, 10.6); B.vent(151, 13, .6); B.spring(154, 14, -1150, 420, .3); B.arc(152, 14, 5, 5, 2);
+  B.cp(160, 12); E('torpedo', 163, 14.4); B.item('health', 162, 12); B.crate(164, 12);
   for (const c of [107, 113, 121, 127, 141, 151, 158]) B.deco('flag', c, 18);
   B.deco('banner', 121, 14.4, { text: 'KEEP OFF THE KEEP' });
   // -- The Director's Office
-  T(166, 14, 'F48'); R(166, 0, 1, 8); deck(172, 11, 4); deck(184, 11, 4); BK(167, 2, 46, 12, 'v');
+  T(166, 14, 'F29'); R(166, 0, 1, 8); deck(172, 11, 4); deck(184, 11, 4); BK(167, 2, 28, 12, 'v');
   B.area(167, 'THE DIRECTOR\'S OFFICE', 'Nine years. Zero incidents. One shrimp.', 0, 22);
   B.arena(167, 193, 14, 192);
   B.deco('window', 172, 6); B.deco('window', 180, 6); B.deco('window', 188, 6); B.deco('banner', 176, 3.6, { text: 'ZERO RECORDED INCIDENTS' });
@@ -598,7 +595,7 @@ function fortress() {
 
 /* ------------------------------------------------------------------ 03 PRESSURE TRENCH CARNIVAL */
 function carnival() {
-  const B = builder(2, 222, 60), { T, R, C, BK, deck, E } = B;
+  const B = builder(2, 213, 60), { T, R, C, BK, deck, E } = B;
   // -- The Midway
   T(0, 16, 'F12 G3 F6 G4 F9 G6 F8');
   B.start(3, 10); B.sign(6, 10, 'EVERY PRIZE\nIS A LIABILITY.');
@@ -621,14 +618,14 @@ function carnival() {
   B.cp(109, 40); E('carnival', 112, 40); B.item('health', 114, 40);
   // -- The Hall of Refunds (fun-house interior, down then through)
   T(116, 43, 'F34'); R(116, 26, 34, 17); BK(116, 26, 34, 17);
-  C(116, 40, 2, 3);                              // way in
-  C(118, 35, 12, 8); R(121, 40, 4, 1, '^');      // lobby with a prize pit
+  C(116, 37, 2, 3);                              // way in (a step down into the lobby)
+  C(118, 35, 12, 8); B.spikes(121, 42, 4);      // lobby with a prize pit
   deck(120, 38, 3); deck(125, 37, 3);
   C(130, 37, 2, 3);                              // corridor
   C(132, 28, 8, 15);                             // mirror shaft
   deck(132, 39, 3); deck(137, 36, 3); deck(132, 33, 3); deck(137, 30, 3);
   C(140, 28, 8, 4); C(146, 32, 2, 8);            // upper gallery then the drop
-  C(140, 37, 10, 6); R(141, 42, 3, 1, '^');      // exit room
+  C(140, 37, 10, 6); B.spikes(141, 42, 3);      // exit room
   C(148, 40, 2, 3);                              // way out
   B.area(117, 'THE HALL OF REFUNDS', 'All complaints are reflected back at you.', 26, 44);
   B.radio(119, [['DRYDOCK', 'I have the lease open. Clause four: the lessee may charge for air, light, and "atmosphere".'], ['CLAX', 'Read faster. Skip to the part where I win.']], 26, 44);
@@ -636,21 +633,21 @@ function carnival() {
   B.tags(133.5, 38, 4, 1.2, -2.4); E('buoy', 135, 34); E('carnival', 143, 30); B.tags(141, 31.2, 5);
   B.npc(138.5, 28, 'FITZ', 'ride operator', 'I pulled the stop lever. It filed a counter-claim.'); B.tags(137, 29.2, 3);
   B.hint(133, 'Up the mirror shaft. Decks on both sides, walls for kicking.', '', 30, 44);
-  E('eel', 145, 40); B.item('health', 147, 34); B.cp(150, 40);
+  E('eel', 145, 40); B.item('health', 147, 34);
   for (const c of [120, 126, 142]) B.deco('window', c, 36.2);
   B.deco('bulbs', 118, 35.3, { w: 12, sag: 1 }); B.deco('bulbs', 140, 28.3, { w: 8, sag: 1 }); B.deco('banner', 133, 27, { text: 'HALL OF REFUNDS' });
   // -- The Big Wheel
-  T(150, 43, 'F5 G22 S-17 F7'); T(155, 52, 'H22');
+  T(150, 43, 'F5 G22 S-17 F7'); B.cp(150, 40);
   B.area(151, 'THE BIG WHEEL', 'It only goes round. Getting off is premium.', 20, 50);
   B.radio(152, [['DOT', 'Gran is at the top of that wheel. She says the view is lovely and the company is a puffer fish with a megaphone.'], ['CLAX', 'Tell her the flotation device is on its way.']], 20, 50);
   B.wheel(166, 35, 8, 8, .42, 2.6);
   B.hook(158, 30); B.hook(174, 26); E('puffer', 161, 27); E('puffer', 171, 31); E('buoy', 166, 23);
-  B.arc(158, 35, 12, 16, 8.5); B.npc(166, 20, 'TILLY', 'Dot\'s gran', 'Are you the hero? You are much shorter on the radio.'); deck(164.5, 22, 3);
+  B.arc(158, 35, 12, 16, 8.5); deck(165, 23, 3); B.npc(166, 20, 'TILLY', 'Dot\'s gran', 'Are you the hero? You are much shorter on the radio.');
   B.hint(153, 'Ride a gondola up and step off at the top right.', 'Tilly is on the little deck above the hub. Jump from a gondola at its peak.', 20, 50);
   B.cp(179, 22); B.item('pressure', 181, 22); B.crate(182, 22);
   B.deco('bulbs', 151, 38, { w: 5 }); B.deco('tent', 180, 26, { s: 1.1 }); B.deco('bulbs', 177, 20, { w: 8 });
   // -- The Refund Department
-  T(184, 26, 'F38'); R(184, 0, 1, 20); deck(190, 23, 4); deck(202, 23, 4); BK(185, 14, 36, 12, 'v');
+  T(184, 26, 'F29'); R(184, 0, 1, 20); deck(190, 23, 4); deck(202, 23, 4); BK(185, 14, 28, 12, 'v');
   B.area(185, 'THE REFUND DEPARTMENT', 'Your call is important to our revenue.', 0, 30);
   B.arena(185, 211, 26, 210);
   B.deco('bulbs', 185, 15, { w: 26, sag: 3 }); B.deco('banner', 195, 15.6, { text: 'NO REFUNDS. NO ESCAPE.' });
@@ -743,7 +740,7 @@ function pollPad() {
 }
 for (const btn of document.querySelectorAll('[data-action]')) {
   const a = btn.dataset.action;
-  btn.addEventListener('pointerdown', e => { e.preventDefault(); btn.setPointerCapture(e.pointerId); touchHeld.add(a); syncHeld(); press(a); btn.classList.add('active'); });
+  btn.addEventListener('pointerdown', e => { e.preventDefault(); try { btn.setPointerCapture(e.pointerId); } catch (err) {} touchHeld.add(a); syncHeld(); press(a); btn.classList.add('active'); });
   const end = e => { e.preventDefault(); touchHeld.delete(a); syncHeld(); btn.classList.remove('active'); };
   btn.addEventListener('pointerup', end); btn.addEventListener('pointercancel', end); btn.addEventListener('lostpointercapture', end);
 }
@@ -952,7 +949,7 @@ function update(dt) {
 function cameraTarget() {
   const p = G.player, L = G.level, c = G.camera;
   if (p.grounded || p.swing || p.wall) c.anchor = p.y; else if (p.y > c.anchor + 40) c.anchor = p.y - 40; else if (p.y < c.anchor - 230) c.anchor = p.y + 230;
-  return [clamp(p.x - W / 2 + c.lead, 0, L.width - W), clamp(c.anchor - 455 + c.look, 0, L.height - H)];
+  return [clamp(p.x - W / 2 + c.lead, 0, L.width - W), clamp(c.anchor - 505 + c.look, 0, L.height - H)];
 }
 function updateCamera(dt) {
   const p = G.player, c = G.camera;
@@ -1030,8 +1027,7 @@ function backdrop(cx, cy, t) {
   // depth haze: only towards the bottom, so the painting keeps its colour
   let gr = ctx.createLinearGradient(0, H * .35, 0, H); gr.addColorStop(0, b.fog + '0)'); gr.addColorStop(1, b.fog + '.5)'); ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
   if (b.id === 'yard') { ctx.save(); ctx.globalAlpha = .07; ctx.fillStyle = b.accent; for (let i = 0; i < 5; i++) { const x = i * 370 - mod(cx * .07, 370); ctx.beginPath(); ctx.moveTo(x, -30); ctx.lineTo(x + 65, -30); ctx.lineTo(x + 350, 720); ctx.lineTo(x + 170, 720); ctx.closePath(); ctx.fill(); } ctx.restore(); }
-  skyline(cx, cy, t, .22, mix(b.sky[1], b.shadow, .45), .62, 0, 520);
-  skyline(cx, cy, t, .42, mix(b.sky[1], b.shadow, .8), .9, 3, 640);
+  if (b.id === 'yard') { skyline(cx, cy, t, .22, mix(b.sky[1], b.shadow, .45), .62, 0, 520); skyline(cx, cy, t, .42, mix(b.sky[1], b.shadow, .8), .9, 3, 640); }
   for (const s of motes) { ctx.globalAlpha = .14 + s.s * .14; ctx.strokeStyle = b.accent; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(mod(s.x - cx * (.12 + s.s * .1) + Math.sin(t * .3 + s.y) * 13, W), mod(s.y - cy * .1 - t * (8 + s.s * 13), H), s.r, 0, Math.PI * 2); ctx.stroke(); }
   ctx.globalAlpha = 1;
 }
@@ -1069,9 +1065,9 @@ function paintBack(g, c0, r0, c1, r1) {
   const L = G.level, b = L.biome, pat = g.createPattern(images[b.tex], 'repeat'), bt = (c, r) => (L.back[r] && L.back[r][c] && L.back[r][c] !== ' ') ? L.back[r][c] : null;
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
     const k = bt(c, r); if (!k || solidT(T_(c, r))) continue; const x = c * TS, y = r * TS;
-    g.fillStyle = k === 'v' ? mix(b.wall, b.haze, .16) : b.wall; g.fillRect(x, y, TS + .5, TS + .5);
-    g.globalAlpha = .2; g.fillStyle = pat; g.fillRect(x, y, TS + .5, TS + .5); g.globalAlpha = 1;
-    g.fillStyle = 'rgba(0,0,0,.2)'; if (r % 2 === 0) g.fillRect(x, y, TS, 2); if ((c + (r >> 1)) % 3 === 0) g.fillRect(x, y, 2, TS);
+    g.fillStyle = k === 'v' ? mix(b.wall, b.haze, .14) : b.wall; g.fillRect(x, y, TS + .5, TS + .5);
+    g.globalAlpha = .07; g.fillStyle = pat; g.fillRect(x, y, TS + .5, TS + .5); g.globalAlpha = 1;
+    g.fillStyle = 'rgba(0,0,0,.22)'; if (r % 3 === 0) g.fillRect(x, y, TS + .5, 3); if (c % 3 === 0) { g.fillRect(x, y, 3, TS + .5); g.fillStyle = 'rgba(255,255,255,.04)'; g.fillRect(x + 3, y, 9, TS + .5); }
     if (hash(c, r) > .55) { g.fillStyle = 'rgba(255,255,255,.07)'; g.beginPath(); g.arc(x + 9, y + 9, 2.4, 0, Math.PI * 2); g.fill(); }
     // contact shadows under ceilings and beside walls sell the depth
     if (massT(T_(c, r - 1))) { const gr = g.createLinearGradient(0, y, 0, y + 46); gr.addColorStop(0, 'rgba(0,0,0,.5)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x, y, TS, 46); }
@@ -1100,8 +1096,8 @@ function paintFront(g, c0, r0, c1, r1) {
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
     const ch = T_(c, r), x = c * TS, y = r * TS; if (c < 0 || c >= L.cols || r < 0 || r >= L.rows || !massT(ch)) continue;
     const sl = slopeT(ch); g.save(); if (sl) { slopePoly(g, c, r, ch); g.clip(); }
-    g.fillStyle = mix(b.floor, '#000000', .18); g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = b.id === 'fortress' ? .5 : .34; g.fillStyle = pat; g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = 1;
-    const d = depth(c, r); if (d) { g.fillStyle = `rgba(3,10,18,${[0, .3, .5, .64][d]})`; g.fillRect(x, y, TS + .6, TS + .6); }
+    g.fillStyle = mix(b.floor, '#000000', .18); g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = b.id === 'fortress' ? .26 : .34; g.fillStyle = pat; g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = 1;
+    const d = depth(c, r); if (d) { g.fillStyle = `rgba(3,10,18,${[0, .2, .34, .44][d]})`; g.fillRect(x, y, TS + .6, TS + .6); }
     g.fillStyle = 'rgba(0,0,0,.2)'; if (r % 2 === 0) g.fillRect(x, y + TS - 2.5, TS + .6, 2.5); if ((c + (r >> 1) * 2) % 4 === 0) g.fillRect(x + TS - 2.5, y, 2.5, TS + .6);
     g.fillStyle = 'rgba(255,255,255,.05)'; if (r % 2 === 0) g.fillRect(x, y, TS + .6, 2); 
     if (hash(c, r) > .55) { g.fillStyle = 'rgba(0,0,0,.4)'; g.beginPath(); g.arc(x + 10, y + 10, 3.4, 0, Math.PI * 2); g.fill(); g.fillStyle = 'rgba(255,255,255,.2)'; g.beginPath(); g.arc(x + 9, y + 9, 1.5, 0, Math.PI * 2); g.fill(); }
@@ -1151,19 +1147,19 @@ function paintFront(g, c0, r0, c1, r1) {
     }
   }
 }
+function getChunk(layer, i, j, paintNow) {
+  const L = G.level, key = layer + ':' + i + ':' + j; let cv = chunkCache.get(key); if (cv !== undefined || !paintNow) return cv;
+  const c0 = Math.floor(i * CH / TS) - 1, r0 = Math.floor(j * CH / TS) - 1, c1 = Math.floor((i + 1) * CH / TS) + 1, r1 = Math.floor((j + 1) * CH / TS) + 1; let any = false;
+  for (let r = Math.max(0, r0); r <= Math.min(L.rows - 1, r1) && !any; r++) for (let c = Math.max(0, c0); c <= Math.min(L.cols - 1, c1); c++) if ((layer === 'b' ? L.back : L.grid)[r][c] !== ' ') { any = true; break; }
+  if (!any) cv = null; else { cv = document.createElement('canvas'); cv.width = cv.height = CH * chunkScale; const g = cv.getContext('2d'); g.scale(chunkScale, chunkScale); g.translate(-i * CH, -j * CH); (layer === 'b' ? paintBack : paintFront)(g, c0, r0, c1, r1); }
+  if (chunkCache.size > 120) chunkCache.delete(chunkCache.keys().next().value); chunkCache.set(key, cv); return cv;
+}
 function drawChunks(layer, cx, cy) {
   const L = G.level; if (chunkLevel !== L) { chunkCache.clear(); chunkLevel = L; chunkScale = clamp(viewScale * dpr, 1, 1.5) > 1.15 ? 1.5 : 1; }
-  for (let j = Math.floor(cy / CH); j <= Math.floor((cy + H) / CH); j++) for (let i = Math.floor(cx / CH); i <= Math.floor((cx + W) / CH); i++) {
-    if (i < 0 || j < 0 || i * CH >= L.width || j * CH >= L.height + CH) continue;
-    const key = layer + ':' + i + ':' + j; let cv = chunkCache.get(key);
-    if (cv === undefined) {
-      const c0 = Math.floor(i * CH / TS) - 1, r0 = Math.floor(j * CH / TS) - 1, c1 = Math.floor((i + 1) * CH / TS) + 1, r1 = Math.floor((j + 1) * CH / TS) + 1; let any = false;
-      for (let r = Math.max(0, r0); r <= Math.min(L.rows - 1, r1) && !any; r++) for (let c = Math.max(0, c0); c <= Math.min(L.cols - 1, c1); c++) if ((layer === 'b' ? L.back : L.grid)[r][c] !== ' ') { any = true; break; }
-      if (!any) cv = null; else { cv = document.createElement('canvas'); cv.width = cv.height = CH * chunkScale; const g = cv.getContext('2d'); g.scale(chunkScale, chunkScale); g.translate(-i * CH, -j * CH); (layer === 'b' ? paintBack : paintFront)(g, c0, r0, c1, r1); }
-      if (chunkCache.size > 90) chunkCache.delete(chunkCache.keys().next().value); chunkCache.set(key, cv);
-    }
-    if (cv) ctx.drawImage(cv, i * CH, j * CH, CH + .5, CH + .5);
-  }
+  const i0 = Math.floor(cx / CH), i1 = Math.floor((cx + W) / CH), j0 = Math.floor(cy / CH), j1 = Math.floor((cy + H) / CH), ok = (i, j) => i >= 0 && j >= 0 && i * CH < L.width && j * CH < L.height + CH;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { if (!ok(i, j)) continue; const cv = getChunk(layer, i, j, true); if (cv) ctx.drawImage(cv, i * CH, j * CH, CH + .5, CH + .5); }
+  // paint one chunk of the surrounding ring per frame so scrolling never has to paint a whole column at once
+  if (layer === 'f') { let budget = 1; for (let j = j0 - 1; j <= j1 + 1 && budget; j++) for (let i = i0 - 1; i <= i1 + 1 && budget; i++) { if (!ok(i, j)) continue; for (const ly of ['f', 'b']) if (budget && getChunk(ly, i, j, false) === undefined) { getChunk(ly, i, j, true); budget--; } } }
 }
 
 /* ---- set dressing ---- */

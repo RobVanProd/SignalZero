@@ -6,9 +6,9 @@ const P = root.CLAX_PHYS || require('./phys.js');
 const TS = P.TS;
 
 const biomes = [
-  { id: 'yard', name: 'Sunken Rescue Yard', subtitle: 'UNAUTHORIZED DEPARTURE', tag: '01 / SALVAGE DISTRICT', sky: ['#092a38', '#29717a'], deep: '#06202b', haze: '#1d6672', accent: '#64e4d6', floor: '#284a49', edge: '#eaa349', shadow: '#092735', tex: 'metal_teal', wall: '#0c2c36', cap: '#e8923f', capDark: '#22323a', fog: 'rgba(16,74,84,' },
-  { id: 'fortress', name: 'The Inflatable Fortress', subtitle: 'SAFETY IS MANDATORY', tag: '02 / BUREAU TERRITORY', sky: ['#1b3657', '#81b2c2'], deep: '#1a2f44', haze: '#789fac', accent: '#ffe4a2', floor: '#6a6257', edge: '#ffad4e', shadow: '#263947', tex: 'metal_orange', wall: '#3a3440', cap: '#f3e2bd', capDark: '#c9662c', fog: 'rgba(120,160,180,' },
-  { id: 'carnival', name: 'Pressure Trench Carnival', subtitle: 'NO REFUNDS. NO ESCAPE.', tag: '03 / THE LAST RELIEF VALVE', sky: ['#160e32', '#43204d'], deep: '#110e29', haze: '#4e2d69', accent: '#ef95de', floor: '#3c2852', edge: '#f4bf59', shadow: '#1e1634', tex: 'purple', wall: '#1d1233', cap: '#f0b84f', capDark: '#4a2060', fog: 'rgba(70,36,110,' }];
+  { id: 'yard', name: 'Sunken Rescue Yard', subtitle: 'UNAUTHORIZED DEPARTURE', tag: '01 / SALVAGE DISTRICT', sky: ['#092a38', '#29717a'], deep: '#06202b', haze: '#1d6672', accent: '#64e4d6', floor: '#284a49', edge: '#eaa349', shadow: '#092735', tex: 'metal_teal', wall: '#082029', cap: '#e8923f', capDark: '#22323a', fog: 'rgba(16,74,84,' },
+  { id: 'fortress', name: 'The Inflatable Fortress', subtitle: 'SAFETY IS MANDATORY', tag: '02 / BUREAU TERRITORY', sky: ['#1b3657', '#81b2c2'], deep: '#1a2f44', haze: '#789fac', accent: '#ffe4a2', floor: '#a07a55', edge: '#ffad4e', shadow: '#263947', tex: 'metal_orange', wall: '#2c2734', cap: '#f3e2bd', capDark: '#c9662c', fog: 'rgba(120,160,180,' },
+  { id: 'carnival', name: 'Pressure Trench Carnival', subtitle: 'NO REFUNDS. NO ESCAPE.', tag: '03 / THE LAST RELIEF VALVE', sky: ['#160e32', '#43204d'], deep: '#110e29', haze: '#4e2d69', accent: '#ef95de', floor: '#3c2852', edge: '#f4bf59', shadow: '#1e1634', tex: 'purple', wall: '#150d26', cap: '#f0b84f', capDark: '#4a2060', fog: 'rgba(70,36,110,' }];
 
 const lines = {
   snap: ['Stand back! I am almost qualified!', 'I read HALF the warning!', 'That was a controlled catastrophe.', 'Your concern has been ignored.', 'Not stolen. Urgently reassigned.', 'I brought my own applause.', 'Put that on my heroic record.'],
@@ -336,11 +336,11 @@ function carnival() {
   B.tags(133.5, 38, 4, 1.2, -2.4); E('buoy', 135, 34); E('carnival', 143, 30); B.tags(141, 31.2, 5);
   B.npc(138.5, 28, 'FITZ', 'ride operator', 'I pulled the stop lever. It filed a counter-claim.'); B.tags(137, 29.2, 3);
   B.hint(133, 'Up the mirror shaft. Decks on both sides, walls for kicking.', '', 30, 44);
-  E('eel', 145, 40); B.item('health', 147, 34); B.cp(150, 40);
+  E('eel', 145, 40); B.item('health', 147, 34);
   for (const c of [120, 126, 142]) B.deco('window', c, 36.2);
   B.deco('bulbs', 118, 35.3, { w: 12, sag: 1 }); B.deco('bulbs', 140, 28.3, { w: 8, sag: 1 }); B.deco('banner', 133, 27, { text: 'HALL OF REFUNDS' });
   // -- The Big Wheel
-  T(150, 43, 'F5 G22 S-17 F7');
+  T(150, 43, 'F5 G22 S-17 F7'); B.cp(150, 40);
   B.area(151, 'THE BIG WHEEL', 'It only goes round. Getting off is premium.', 20, 50);
   B.radio(152, [['DOT', 'Gran is at the top of that wheel. She says the view is lovely and the company is a puffer fish with a megaphone.'], ['CLAX', 'Tell her the flotation device is on its way.']], 20, 50);
   B.wheel(166, 35, 8, 8, .42, 2.6);

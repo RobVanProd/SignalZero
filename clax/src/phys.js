@@ -229,15 +229,12 @@ function stepPlayer(p, inp, L, dt, ev = () => {}) {
       return g;
     };
     ground = pick(p.x, ny);
+    // stay glued to the ground when running over crests and down slopes (centre first, so descents start smoothly)
+    if (!ground && wasGrounded && !jumped && p.drop <= 0) ground = probe(L, p.x, ny, ny + 14 + Math.abs(p.vx) * dt * 1.6, true);
     if (!ground) { const a = pick(p.x - K.foot, ny), b = pick(p.x + K.foot, ny); ground = a && b ? (a.y < b.y ? a : b) : a || b; if (ground && ground.slope) ground = null; }
     if (ow) for (const q of L.movers) {
       if (q.absent > 0) continue;
       if (p.x > q.x - 12 && p.x < q.x + q.w + 12 && oldY <= q.y - (q.dy || 0) + 9 && ny >= q.y && (!ground || q.y < ground.y)) { ground = { y: q.y, slope: 0, oneWay: true, bouncy: false }; support = q; }
-    }
-    // stay glued to the ground when running over crests and down slopes
-    if (!ground && wasGrounded && !jumped && p.drop <= 0) {
-      const g = probe(L, p.x, ny, ny + 14 + Math.abs(p.vx) * dt * 1.6, true);
-      if (g) ground = g;
     }
   }
   if (ground) {

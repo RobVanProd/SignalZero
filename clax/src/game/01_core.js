@@ -62,7 +62,7 @@ function pollPad() {
 }
 for (const btn of document.querySelectorAll('[data-action]')) {
   const a = btn.dataset.action;
-  btn.addEventListener('pointerdown', e => { e.preventDefault(); btn.setPointerCapture(e.pointerId); touchHeld.add(a); syncHeld(); press(a); btn.classList.add('active'); });
+  btn.addEventListener('pointerdown', e => { e.preventDefault(); try { btn.setPointerCapture(e.pointerId); } catch (err) {} touchHeld.add(a); syncHeld(); press(a); btn.classList.add('active'); });
   const end = e => { e.preventDefault(); touchHeld.delete(a); syncHeld(); btn.classList.remove('active'); };
   btn.addEventListener('pointerup', end); btn.addEventListener('pointercancel', end); btn.addEventListener('lostpointercapture', end);
 }

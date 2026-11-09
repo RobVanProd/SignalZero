@@ -12,8 +12,7 @@ function backdrop(cx, cy, t) {
   // depth haze: only towards the bottom, so the painting keeps its colour
   let gr = ctx.createLinearGradient(0, H * .35, 0, H); gr.addColorStop(0, b.fog + '0)'); gr.addColorStop(1, b.fog + '.5)'); ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
   if (b.id === 'yard') { ctx.save(); ctx.globalAlpha = .07; ctx.fillStyle = b.accent; for (let i = 0; i < 5; i++) { const x = i * 370 - mod(cx * .07, 370); ctx.beginPath(); ctx.moveTo(x, -30); ctx.lineTo(x + 65, -30); ctx.lineTo(x + 350, 720); ctx.lineTo(x + 170, 720); ctx.closePath(); ctx.fill(); } ctx.restore(); }
-  skyline(cx, cy, t, .22, mix(b.sky[1], b.shadow, .45), .62, 0, 520);
-  skyline(cx, cy, t, .42, mix(b.sky[1], b.shadow, .8), .9, 3, 640);
+  if (b.id === 'yard') { skyline(cx, cy, t, .22, mix(b.sky[1], b.shadow, .45), .62, 0, 520); skyline(cx, cy, t, .42, mix(b.sky[1], b.shadow, .8), .9, 3, 640); }
   for (const s of motes) { ctx.globalAlpha = .14 + s.s * .14; ctx.strokeStyle = b.accent; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(mod(s.x - cx * (.12 + s.s * .1) + Math.sin(t * .3 + s.y) * 13, W), mod(s.y - cy * .1 - t * (8 + s.s * 13), H), s.r, 0, Math.PI * 2); ctx.stroke(); }
   ctx.globalAlpha = 1;
 }
@@ -51,9 +50,9 @@ function paintBack(g, c0, r0, c1, r1) {
   const L = G.level, b = L.biome, pat = g.createPattern(images[b.tex], 'repeat'), bt = (c, r) => (L.back[r] && L.back[r][c] && L.back[r][c] !== ' ') ? L.back[r][c] : null;
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
     const k = bt(c, r); if (!k || solidT(T_(c, r))) continue; const x = c * TS, y = r * TS;
-    g.fillStyle = k === 'v' ? mix(b.wall, b.haze, .16) : b.wall; g.fillRect(x, y, TS + .5, TS + .5);
-    g.globalAlpha = .2; g.fillStyle = pat; g.fillRect(x, y, TS + .5, TS + .5); g.globalAlpha = 1;
-    g.fillStyle = 'rgba(0,0,0,.2)'; if (r % 2 === 0) g.fillRect(x, y, TS, 2); if ((c + (r >> 1)) % 3 === 0) g.fillRect(x, y, 2, TS);
+    g.fillStyle = k === 'v' ? mix(b.wall, b.haze, .14) : b.wall; g.fillRect(x, y, TS + .5, TS + .5);
+    g.globalAlpha = .07; g.fillStyle = pat; g.fillRect(x, y, TS + .5, TS + .5); g.globalAlpha = 1;
+    g.fillStyle = 'rgba(0,0,0,.22)'; if (r % 3 === 0) g.fillRect(x, y, TS + .5, 3); if (c % 3 === 0) { g.fillRect(x, y, 3, TS + .5); g.fillStyle = 'rgba(255,255,255,.04)'; g.fillRect(x + 3, y, 9, TS + .5); }
     if (hash(c, r) > .55) { g.fillStyle = 'rgba(255,255,255,.07)'; g.beginPath(); g.arc(x + 9, y + 9, 2.4, 0, Math.PI * 2); g.fill(); }
     // contact shadows under ceilings and beside walls sell the depth
     if (massT(T_(c, r - 1))) { const gr = g.createLinearGradient(0, y, 0, y + 46); gr.addColorStop(0, 'rgba(0,0,0,.5)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x, y, TS, 46); }
@@ -82,8 +81,8 @@ function paintFront(g, c0, r0, c1, r1) {
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
     const ch = T_(c, r), x = c * TS, y = r * TS; if (c < 0 || c >= L.cols || r < 0 || r >= L.rows || !massT(ch)) continue;
     const sl = slopeT(ch); g.save(); if (sl) { slopePoly(g, c, r, ch); g.clip(); }
-    g.fillStyle = mix(b.floor, '#000000', .18); g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = b.id === 'fortress' ? .5 : .34; g.fillStyle = pat; g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = 1;
-    const d = depth(c, r); if (d) { g.fillStyle = `rgba(3,10,18,${[0, .3, .5, .64][d]})`; g.fillRect(x, y, TS + .6, TS + .6); }
+    g.fillStyle = mix(b.floor, '#000000', .18); g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = b.id === 'fortress' ? .26 : .34; g.fillStyle = pat; g.fillRect(x, y, TS + .6, TS + .6); g.globalAlpha = 1;
+    const d = depth(c, r); if (d) { g.fillStyle = `rgba(3,10,18,${[0, .2, .34, .44][d]})`; g.fillRect(x, y, TS + .6, TS + .6); }
     g.fillStyle = 'rgba(0,0,0,.2)'; if (r % 2 === 0) g.fillRect(x, y + TS - 2.5, TS + .6, 2.5); if ((c + (r >> 1) * 2) % 4 === 0) g.fillRect(x + TS - 2.5, y, 2.5, TS + .6);
     g.fillStyle = 'rgba(255,255,255,.05)'; if (r % 2 === 0) g.fillRect(x, y, TS + .6, 2); 
     if (hash(c, r) > .55) { g.fillStyle = 'rgba(0,0,0,.4)'; g.beginPath(); g.arc(x + 10, y + 10, 3.4, 0, Math.PI * 2); g.fill(); g.fillStyle = 'rgba(255,255,255,.2)'; g.beginPath(); g.arc(x + 9, y + 9, 1.5, 0, Math.PI * 2); g.fill(); }
@@ -133,19 +132,19 @@ function paintFront(g, c0, r0, c1, r1) {
     }
   }
 }
+function getChunk(layer, i, j, paintNow) {
+  const L = G.level, key = layer + ':' + i + ':' + j; let cv = chunkCache.get(key); if (cv !== undefined || !paintNow) return cv;
+  const c0 = Math.floor(i * CH / TS) - 1, r0 = Math.floor(j * CH / TS) - 1, c1 = Math.floor((i + 1) * CH / TS) + 1, r1 = Math.floor((j + 1) * CH / TS) + 1; let any = false;
+  for (let r = Math.max(0, r0); r <= Math.min(L.rows - 1, r1) && !any; r++) for (let c = Math.max(0, c0); c <= Math.min(L.cols - 1, c1); c++) if ((layer === 'b' ? L.back : L.grid)[r][c] !== ' ') { any = true; break; }
+  if (!any) cv = null; else { cv = document.createElement('canvas'); cv.width = cv.height = CH * chunkScale; const g = cv.getContext('2d'); g.scale(chunkScale, chunkScale); g.translate(-i * CH, -j * CH); (layer === 'b' ? paintBack : paintFront)(g, c0, r0, c1, r1); }
+  if (chunkCache.size > 120) chunkCache.delete(chunkCache.keys().next().value); chunkCache.set(key, cv); return cv;
+}
 function drawChunks(layer, cx, cy) {
   const L = G.level; if (chunkLevel !== L) { chunkCache.clear(); chunkLevel = L; chunkScale = clamp(viewScale * dpr, 1, 1.5) > 1.15 ? 1.5 : 1; }
-  for (let j = Math.floor(cy / CH); j <= Math.floor((cy + H) / CH); j++) for (let i = Math.floor(cx / CH); i <= Math.floor((cx + W) / CH); i++) {
-    if (i < 0 || j < 0 || i * CH >= L.width || j * CH >= L.height + CH) continue;
-    const key = layer + ':' + i + ':' + j; let cv = chunkCache.get(key);
-    if (cv === undefined) {
-      const c0 = Math.floor(i * CH / TS) - 1, r0 = Math.floor(j * CH / TS) - 1, c1 = Math.floor((i + 1) * CH / TS) + 1, r1 = Math.floor((j + 1) * CH / TS) + 1; let any = false;
-      for (let r = Math.max(0, r0); r <= Math.min(L.rows - 1, r1) && !any; r++) for (let c = Math.max(0, c0); c <= Math.min(L.cols - 1, c1); c++) if ((layer === 'b' ? L.back : L.grid)[r][c] !== ' ') { any = true; break; }
-      if (!any) cv = null; else { cv = document.createElement('canvas'); cv.width = cv.height = CH * chunkScale; const g = cv.getContext('2d'); g.scale(chunkScale, chunkScale); g.translate(-i * CH, -j * CH); (layer === 'b' ? paintBack : paintFront)(g, c0, r0, c1, r1); }
-      if (chunkCache.size > 90) chunkCache.delete(chunkCache.keys().next().value); chunkCache.set(key, cv);
-    }
-    if (cv) ctx.drawImage(cv, i * CH, j * CH, CH + .5, CH + .5);
-  }
+  const i0 = Math.floor(cx / CH), i1 = Math.floor((cx + W) / CH), j0 = Math.floor(cy / CH), j1 = Math.floor((cy + H) / CH), ok = (i, j) => i >= 0 && j >= 0 && i * CH < L.width && j * CH < L.height + CH;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { if (!ok(i, j)) continue; const cv = getChunk(layer, i, j, true); if (cv) ctx.drawImage(cv, i * CH, j * CH, CH + .5, CH + .5); }
+  // paint one chunk of the surrounding ring per frame so scrolling never has to paint a whole column at once
+  if (layer === 'f') { let budget = 1; for (let j = j0 - 1; j <= j1 + 1 && budget; j++) for (let i = i0 - 1; i <= i1 + 1 && budget; i++) { if (!ok(i, j)) continue; for (const ly of ['f', 'b']) if (budget && getChunk(ly, i, j, false) === undefined) { getChunk(ly, i, j, true); budget--; } } }
 }
 
 /* ---- set dressing ---- */
